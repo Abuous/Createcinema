@@ -1,5 +1,7 @@
 # Create Cinema
 
+[中文说明](README.zh-CN.md)
+
 Create Cinema is a Minecraft 1.21.1 NeoForge addon for Create. It adds kinetic projectors, local film burning, network video projection, speaker audio, redstone volume control, and screen-focused projection effects.
 
 ## Requirements
