@@ -14,7 +14,7 @@ import java.time.Duration;
 
 final class VideoResolverHttp {
     static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NORMAL).build();
+            .connectTimeout(Duration.ofSeconds(6)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
     private VideoResolverHttp() {
     }
@@ -24,7 +24,7 @@ final class VideoResolverHttp {
     }
 
     static String getText(String url, String referer) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(20))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10))
                 .header("User-Agent", BilibiliResolver.USER_AGENT).header("Referer", referer).GET().build();
         HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2) throw new IOException("HTTP " + response.statusCode());

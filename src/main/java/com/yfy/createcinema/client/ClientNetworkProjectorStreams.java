@@ -39,6 +39,7 @@ public final class ClientNetworkProjectorStreams {
     private static final double MAX_BUFFER_SECONDS = 1.50;
     private static final double HARD_RESYNC_SECONDS = 3.0;
     private static final double DISPLAY_LEAD_SECONDS = 0.035;
+    private static final String NETWORK_RW_TIMEOUT_MICROS = "5000000";
     private static final Map<String, Session> SESSIONS = new HashMap<>();
     private static final ExecutorService STREAM_EXECUTOR = new ThreadPoolExecutor(4, 4, 30L, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(16), runnable -> {
@@ -387,10 +388,14 @@ public final class ClientNetworkProjectorStreams {
     static void configure(FFmpegFrameGrabber grabber, String referer) {
         grabber.setOption("user_agent", BilibiliResolver.USER_AGENT);
         if (referer != null && !referer.isBlank()) grabber.setOption("referer", referer);
-        grabber.setOption("rw_timeout", "15000000");
+        grabber.setOption("rw_timeout", NETWORK_RW_TIMEOUT_MICROS);
+        grabber.setOption("timeout", NETWORK_RW_TIMEOUT_MICROS);
+        grabber.setOption("stimeout", NETWORK_RW_TIMEOUT_MICROS);
         grabber.setOption("reconnect", "1");
         grabber.setOption("reconnect_streamed", "1");
-        grabber.setOption("reconnect_delay_max", "5");
+        grabber.setOption("reconnect_on_network_error", "1");
+        grabber.setOption("reconnect_delay_max", "2");
+        grabber.setOption("reconnect_max_retries", "2");
     }
 
     private static DecodedFrame decodeRawFrame(Frame frame) throws IOException {

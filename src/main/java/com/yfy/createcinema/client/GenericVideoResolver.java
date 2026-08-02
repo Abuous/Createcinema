@@ -37,7 +37,7 @@ final class GenericVideoResolver {
     static BilibiliResolver.ResolvedMedia resolve(String input) throws IOException, InterruptedException {
         URI inputUri = URI.create(input);
         if (isLikelyDirectMedia(input)) return media(input, input);
-        HttpRequest request = HttpRequest.newBuilder(inputUri).timeout(Duration.ofSeconds(20))
+        HttpRequest request = HttpRequest.newBuilder(inputUri).timeout(Duration.ofSeconds(10))
                 .header("User-Agent", BilibiliResolver.USER_AGENT)
                 .header("Accept", "text/html,video/*,audio/*,*/*;q=0.8").GET().build();
         HttpResponse<InputStream> response = VideoResolverHttp.HTTP.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -122,7 +122,7 @@ final class GenericVideoResolver {
     }
 
     private static Optional<String> fetchHtmlMedia(String url, String referer, int depth) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(20))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10))
                 .header("User-Agent", BilibiliResolver.USER_AGENT)
                 .header("Accept", "text/html,video/*,audio/*,*/*;q=0.8")
                 .header("Referer", referer).GET().build();
