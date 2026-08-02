@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "createcinema:block/projector" },
+    "facing=east": { "model": "createcinema:block/projector", "y": 90 },
+    "facing=south": { "model": "createcinema:block/projector", "y": 180 },
+    "facing=west": { "model": "createcinema:block/projector", "y": 270 }
+  }
+}

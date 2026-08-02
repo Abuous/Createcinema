@@ -1,0 +1,1 @@
+{"type":"minecraft:crafting_shaped","pattern":[" E ","CPC","ASA"],"key":{"E":{"item":"minecraft:ender_eye"},"C":{"item":"minecraft:copper_ingot"},"P":{"item":"createcinema:projector"},"A":{"item":"minecraft:andesite"},"S":{"item":"create:shaft"}},"result":{"id":"createcinema:network_projector","count":1}}

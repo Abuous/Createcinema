@@ -1,0 +1,34 @@
+package com.yfy.createcinema.client;
+
+import com.yfy.createcinema.CreateCinema;
+import com.yfy.createcinema.ModRegistry;
+import com.yfy.createcinema.gui.BurnerScreen;
+import com.yfy.createcinema.gui.NetworkProjectorScreen;
+import com.yfy.createcinema.gui.ProjectorScreen;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+
+@EventBusSubscriber(modid = CreateCinema.MODID, value = Dist.CLIENT)
+public class ClientEventHandler {
+    @SubscribeEvent
+    public static void onClientSetup(FMLClientSetupEvent event) {
+        event.enqueueWork(ClientVideoBurner::preloadFfmpeg);
+    }
+
+    @SubscribeEvent
+    public static void registerScreens(RegisterMenuScreensEvent event) {
+        event.register(ModRegistry.BURNER_MENU.get(), BurnerScreen::new);
+        event.register(ModRegistry.PROJECTOR_MENU.get(), ProjectorScreen::new);
+        event.register(ModRegistry.NETWORK_PROJECTOR_MENU.get(), NetworkProjectorScreen::new);
+    }
+
+    @SubscribeEvent
+    public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(ModRegistry.PROJECTOR_BE.get(), ProjectorRenderer::new);
+        event.registerBlockEntityRenderer(ModRegistry.NETWORK_PROJECTOR_BE.get(), ProjectorRenderer::new);
+    }
+}

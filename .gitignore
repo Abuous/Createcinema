@@ -1,0 +1,24 @@
+# Gradle and build output
+.gradle/
+build/
+out/
+repo/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# Minecraft run data and logs
+run/
+logs/
+crash-reports/
+hs_err_pid*.log
+replay_pid*.log
+
+# Local generated caches
+src/generated/resources/.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
