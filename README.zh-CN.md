@@ -14,6 +14,25 @@ Create Cinema 是一个面向 Minecraft 1.21.1、NeoForge 和 Create 的电影�
 
 项目内嵌 JavaCV/FFmpeg 运行依赖，用于本地视频烧录和网络流解码。
 
+必需模组、内嵌库和上游许可证说明见 [第三方组件说明](THIRD_PARTY_NOTICES.zh-CN.md)。
+
+## 依赖和鸣谢
+
+Create Cinema 构建在 Minecraft、NeoForge 和 Create 之上，并使用了 Create/NeoForge 生态中的库以及用于视频播放的媒体处理库。
+
+- Minecraft：目标游戏平台，属于 Mojang/Microsoft。
+- NeoForge：模组加载器和模组开发 API。
+- Create：必需运行模组，提供 Create 动力系统集成。
+- Ponder：Create 生态的 UI/教程依赖。
+- Flywheel：Create 渲染/运行时依赖。
+- Registrate：注册辅助库。
+- JavaCV 和 JavaCPP：基于 FFmpeg 的视频/音频绑定和原生运行时。
+- Bytedeco FFmpeg binaries：视频/音频解码和编码。
+- jsoup：用于网络视频 URL 发现的 HTML 解析库。
+- Parchment mappings：构建时使用的开发映射。
+
+这些依赖不会因为 Create Cinema 的 MIT 许可证而被重新授权。它们的名称、代码、资源和二进制文件仍然遵循各自上游项目的许可证和使用条款。
+
 ## 主要功能
 
 - 电影烧录机：把本地视频文件转换为游戏内胶卷。
@@ -108,4 +127,6 @@ build/libs/createcinema-0.1.0-1.21.1.jar
 
 ## 许可证
 
-MIT，以 `gradle.properties` 中声明为准。
+Create Cinema 源代码采用 [MIT License](LICENSE)，并已在 `gradle.properties` 和 NeoForge 模组元数据中声明。
+
+Minecraft、NeoForge、Create、Ponder、Flywheel、Registrate、JavaCV、JavaCPP、FFmpeg、jsoup 以及在线视频服务仍遵循各自的许可证和使用条款。详见 [第三方组件说明](THIRD_PARTY_NOTICES.zh-CN.md)。

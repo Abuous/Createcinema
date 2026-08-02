@@ -14,6 +14,25 @@ Create Cinema is a Minecraft 1.21.1 NeoForge addon for Create. It adds kinetic p
 
 The project embeds JavaCV/FFmpeg runtime dependencies for local video burning and network stream decoding.
 
+See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for the required mods, embedded libraries, and upstream license notes.
+
+## Dependencies and Credits
+
+Create Cinema is built on top of Minecraft, NeoForge, and Create. It also uses libraries from the Create/NeoForge ecosystem and media-processing libraries for video playback.
+
+- Minecraft: target game platform, owned by Mojang/Microsoft.
+- NeoForge: mod loader and modding API.
+- Create: required runtime mod and kinetic system integration.
+- Ponder: Create ecosystem UI/tutorial dependency.
+- Flywheel: Create rendering/runtime dependency.
+- Registrate: registration helper library.
+- JavaCV and JavaCPP: FFmpeg-backed video/audio bindings and native runtime.
+- FFmpeg binaries from Bytedeco presets: video/audio decoding and encoding.
+- jsoup: HTML parsing for network video URL discovery.
+- Parchment mappings: development mappings used at build time.
+
+These dependencies are not relicensed by Create Cinema. Their names, code, assets, and binaries remain under their own upstream licenses and terms.
+
 ## Main Features
 
 - Film Burner: converts local video files into in-game film packages.
@@ -108,4 +127,6 @@ build/libs/createcinema-0.1.0-1.21.1.jar
 
 ## License
 
-MIT, as declared in `gradle.properties`.
+Create Cinema source code is licensed under the [MIT License](LICENSE), as declared in `gradle.properties` and the NeoForge mod metadata.
+
+Minecraft, NeoForge, Create, Ponder, Flywheel, Registrate, JavaCV, JavaCPP, FFmpeg, jsoup, and online video services remain under their own licenses and terms. See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
