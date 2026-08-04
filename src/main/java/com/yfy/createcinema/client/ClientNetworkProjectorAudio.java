@@ -92,6 +92,12 @@ public final class ClientNetworkProjectorAudio {
         String key = source.key();
         long gameTime = minecraft.level.getGameTime();
         ActiveSource active = ACTIVE.get(key);
+        if (active != null && active.shared != null && active.shared.failure() != null) {
+            CreateCinema.LOGGER.debug("Recreating live network audio after shared decoder failure for {}", key,
+                    active.shared.failure());
+            stopKey(key);
+            active = null;
+        }
         if (active != null && !sameProjector(active.projector, projector)) {
             stopKey(key);
             active = null;
@@ -190,11 +196,7 @@ public final class ClientNetworkProjectorAudio {
     }
 
     private static boolean sameProjector(NetworkProjectorBlockEntity first, NetworkProjectorBlockEntity second) {
-        if (first == second) return true;
-        if (!first.getBlockPos().equals(second.getBlockPos()) || first.getLevel() == null || second.getLevel() == null) {
-            return false;
-        }
-        return first.getLevel() == second.getLevel();
+        return first == second;
     }
 
     private static final class ActiveSource {

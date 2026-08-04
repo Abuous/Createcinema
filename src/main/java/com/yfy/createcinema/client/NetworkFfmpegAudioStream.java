@@ -4,7 +4,6 @@ import com.yfy.createcinema.CreateCinema;
 import net.minecraft.client.sounds.AudioStream;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
-import org.lwjgl.system.MemoryUtil;
 
 import javax.sound.sampled.AudioFormat;
 import java.io.IOException;
@@ -17,19 +16,24 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.DoubleSupplier;
 
 public class NetworkFfmpegAudioStream implements AudioStream {
     private static final int MAX_BUFFERED_PCM_CHUNKS = 96;
-    private static final int STARTUP_BUFFER_MILLIS = 800;
+    private static final int STARTUP_BUFFER_MILLIS = 1_000;
     private static final int STARTUP_WAIT_TIMEOUT_MILLIS = 2_000;
     private static final int MAX_BUFFERED_PCM_MILLIS = 4_000;
-    private static final int READ_WAIT_MILLIS = 50;
-    private static final int LIVE_READ_WAIT_MILLIS = 200;
+    private static final int MAX_READ_MILLIS = 250;
+    private static final ExecutorService CLOSE_EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "CreateCinema Network Audio Close");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final FFmpegFrameGrabber grabber;
     private final AudioFormat format;
@@ -39,7 +43,6 @@ public class NetworkFfmpegAudioStream implements AudioStream {
     private final boolean live;
     private final ArrayBlockingQueue<ByteBuffer> decoded = new ArrayBlockingQueue<>(MAX_BUFFERED_PCM_CHUNKS);
     private final AtomicInteger bufferedBytes = new AtomicInteger();
-    private final AtomicLong consecutiveSilentBytes = new AtomicLong();
     private final AtomicBoolean resourcesClosed = new AtomicBoolean();
     private final Thread decoderThread;
 
@@ -124,21 +127,27 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         return startTime;
     }
 
-    public double consecutiveSilenceSeconds() {
-        return consecutiveSilentBytes.get() / (double) Math.max(1, bytesForMillis(1_000));
-    }
-
     public boolean decoderEnded() {
         return decoderEnded;
     }
 
     @Override
     public ByteBuffer read(int requestedBytes) throws IOException {
-        ByteBuffer output = MemoryUtil.memAlloc(Math.max(1, requestedBytes)).order(ByteOrder.LITTLE_ENDIAN);
+        return readPcm(requestedBytes, 0, true);
+    }
+
+    /** Reads only decoded PCM so a shared producer cannot outrun the decoder with silence. */
+    ByteBuffer readDecoded(int requestedBytes, int waitMillis) throws IOException {
+        return readPcm(requestedBytes, waitMillis, false);
+    }
+
+    private ByteBuffer readPcm(int requestedBytes, int waitMillis, boolean padSilence) throws IOException {
+        ByteBuffer output = ByteBuffer.allocateDirect(Math.max(1, Math.min(requestedBytes, bytesForMillis(MAX_READ_MILLIS))))
+                .order(ByteOrder.LITTLE_ENDIAN);
         try {
+            boolean waitForFirstChunk = waitMillis > 0;
             while (output.hasRemaining() && !closed) {
                 if (pending.hasRemaining()) {
-                    consecutiveSilentBytes.set(0L);
                     int count = Math.min(output.remaining(), pending.remaining());
                     int limit = pending.limit();
                     pending.limit(pending.position() + count);
@@ -146,16 +155,14 @@ public class NetworkFfmpegAudioStream implements AudioStream {
                     pending.limit(limit);
                     continue;
                 }
-                ByteBuffer next = pollDecoded(!decoderEnded ? live ? LIVE_READ_WAIT_MILLIS : READ_WAIT_MILLIS : 0);
-                if (next == null) {
-                    fillSilence(output);
-                    break;
-                }
+                ByteBuffer next = pollDecoded(waitForFirstChunk ? waitMillis : 0);
+                waitForFirstChunk = false;
+                if (next == null) break;
                 pending = next;
             }
+            if (padSilence && !closed) while (output.hasRemaining()) output.put((byte) 0);
             return output.flip();
         } catch (Throwable error) {
-            MemoryUtil.memFree(output);
             if (error instanceof IOException io) throw io;
             throw new IOException("Failed to read network audio", error);
         }
@@ -231,11 +238,6 @@ public class NetworkFfmpegAudioStream implements AudioStream {
             }
         }
         return discarded / (double) bytesPerSecond;
-    }
-
-    private void fillSilence(ByteBuffer output) {
-        consecutiveSilentBytes.addAndGet(output.remaining());
-        while (output.hasRemaining()) output.put((byte) 0);
     }
 
     private Frame grabSamples() throws Exception {
@@ -323,17 +325,19 @@ public class NetworkFfmpegAudioStream implements AudioStream {
 
     private void closeResources() {
         if (!resourcesClosed.compareAndSet(false, true)) return;
-        try {
-            grabber.close();
-        } catch (Exception ignored) {
-        }
-        if (input != null) {
+        CLOSE_EXECUTOR.execute(() -> {
             try {
-                input.close();
-            } catch (IOException ignored) {
+                grabber.close();
+            } catch (Exception ignored) {
             }
-        }
-        CreateCinema.LOGGER.debug("Closed {} network audio stream", live ? "live" : "video");
+            if (input != null) {
+                try {
+                    input.close();
+                } catch (IOException ignored) {
+                }
+            }
+            CreateCinema.LOGGER.debug("Closed {} network audio stream", live ? "live" : "video");
+        });
     }
 
     private static double wrap(double value, double duration) {

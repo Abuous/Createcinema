@@ -3,10 +3,8 @@ package com.yfy.createcinema.client;
 import com.mojang.blaze3d.audio.Channel;
 import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.PlaybackSpeeds;
-import com.yfy.createcinema.audio.CinemaAudioNetwork;
 import com.yfy.createcinema.block.SpeakerBlock;
 import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
-import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.AbstractSoundInstance;
 import net.minecraft.client.resources.sounds.Sound;
@@ -29,11 +27,17 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class NetworkProjectorSoundInstance extends AbstractSoundInstance implements TickableSoundInstance {
     private static final double RESYNC_THRESHOLD_SECONDS = 0.75;
     private static final int RESYNC_CONFIRM_TICKS = 10;
-    private final BlockPos projectorPos;
+    private static final ExecutorService AUDIO_OPEN_EXECUTOR = Executors.newFixedThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "CreateCinema Network Audio Open");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final BlockPos speakerPos;
     private final NetworkProjectorBlockEntity projector;
     private final String url;
@@ -46,7 +50,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     private volatile ChannelAccess.ChannelHandle channelHandle;
     private volatile boolean channelStarted;
     private volatile long channelStartedNanos;
-    private int connectionCheck;
     private boolean audioClockStarted;
     private double expectedTime;
     private long audioClockNanos;
@@ -57,7 +60,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
                                          ClientNetworkProjectorStreams.AudioSource source,
                                          SharedNetworkAudio sharedAudio) {
         super(soundLocation(projector.getBlockPos(), speaker), SoundSource.RECORDS, RandomSource.create());
-        projectorPos = projector.getBlockPos().immutable();
         speakerPos = speaker.immutable();
         this.projector = projector;
         url = projector.getUrl();
@@ -109,9 +111,10 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
             } catch (Exception e) {
                 CreateCinema.LOGGER.warn("Failed to open {} network audio for {}",
                         sourceMedia.live() ? "live" : "video", url, e);
+                stopInstance();
                 throw new CompletionException(e);
             }
-        }, Util.nonCriticalIoPool());
+        }, AUDIO_OPEN_EXECUTOR);
     }
 
     @Override
@@ -138,13 +141,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
             CreateCinema.LOGGER.debug("Stopping network audio {} after shared decoder failure", url, sharedAudio.failure());
             stopInstance();
             return;
-        }
-        if (--connectionCheck <= 0) {
-            connectionCheck = 10;
-            if (!CinemaAudioNetwork.isConnected(projector.getLevel(), projectorPos, speakerPos)) {
-                stopInstance();
-                return;
-            }
         }
         if (Double.isNaN(streamStartTime) || !channelStarted) return;
         if (!audioClockStarted) {
@@ -194,12 +190,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         ChannelAccess.ChannelHandle handle = channelHandle;
         if (handle != null) handle.execute(Channel::stop);
         AudioStream stream = audioStream;
-        if (stream != null) CompletableFuture.runAsync(() -> {
-            try {
-                stream.close();
-            } catch (IOException ignored) {
-            }
-        }, Util.nonCriticalIoPool());
+        closeStream(stream);
     }
 
     public void onChannelStarted(SoundEngine engine, Channel channel) {
@@ -209,12 +200,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
             if (handle != null) handle.execute(Channel::stop);
             else channel.stop();
             AudioStream stream = audioStream;
-            if (stream != null) CompletableFuture.runAsync(() -> {
-                try {
-                    stream.close();
-                } catch (IOException ignored) {
-                }
-            }, Util.nonCriticalIoPool());
+            closeStream(stream);
             CreateCinema.LOGGER.debug("Stopped late network audio channel for {}", url);
             return;
         }
@@ -229,6 +215,14 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         x = position.x;
         y = position.y;
         z = position.z;
+    }
+
+    private static void closeStream(AudioStream stream) {
+        if (stream == null) return;
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+        }
     }
 
     private static float playbackRate(NetworkProjectorBlockEntity projector,

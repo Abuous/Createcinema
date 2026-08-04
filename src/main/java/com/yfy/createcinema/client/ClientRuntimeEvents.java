@@ -1,5 +1,6 @@
 package com.yfy.createcinema.client;
 import com.yfy.createcinema.CreateCinema;
+import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -7,6 +8,8 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.sound.PlayStreamingSourceEvent;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
+import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.minecraft.world.level.chunk.LevelChunk;
 @EventBusSubscriber(modid = CreateCinema.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.GAME)
 public class ClientRuntimeEvents {
     private static Object activeLevel;
@@ -23,6 +26,12 @@ public class ClientRuntimeEvents {
     @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
         clearPlayback();
         activeLevel = null;
+    }
+    @SubscribeEvent public static void chunkLoad(ChunkEvent.Load event) {
+        if (!(event.getChunk() instanceof LevelChunk chunk) || !chunk.getLevel().isClientSide) return;
+        chunk.getBlockEntities().values().forEach(blockEntity -> {
+            if (blockEntity instanceof NetworkProjectorBlockEntity projector) ClientNetworkProjectorAudio.mark(projector);
+        });
     }
     @SubscribeEvent public static void streamingSourceStarted(PlayStreamingSourceEvent event) {
         if (event.getSound() instanceof FilmSoundInstance film) film.onChannelStarted();

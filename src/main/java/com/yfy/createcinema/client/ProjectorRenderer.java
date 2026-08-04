@@ -81,13 +81,13 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
                 ClientNetworkProjectorStreams.stop(projector);
                 return;
             }
+            ClientNetworkProjectorAudio.mark(projector);
             ScreenRect screen = findScreenCached(level, projector.getBlockPos(), facing);
             if (screen == null) {
                 ClientNetworkProjectorAudio.stop(projector);
                 ClientNetworkProjectorStreams.stop(projector);
                 return;
             }
-            ClientNetworkProjectorAudio.mark(projector);
             double playTime = interpolatedPlayTime(projector.getPlayTime(), projector.getSpeed(), partialTick);
             NetworkProjectionFrame frame = ClientNetworkProjectorStreams.frame(projector, playTime);
             networkStatus = ClientNetworkProjectorStreams.status(projector);
