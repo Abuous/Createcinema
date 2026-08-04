@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [" R ", "CBC", " P "],
+  "key": {
+    "R": { "item": "minecraft:redstone" },
+    "C": { "item": "minecraft:copper_ingot" },
+    "B": { "item": "minecraft:book" },
+    "P": { "item": "minecraft:comparator" }
+  },
+  "result": { "id": "createcinema:config_manager", "count": 1 }
+}

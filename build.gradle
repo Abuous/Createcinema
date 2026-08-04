@@ -1,0 +1,178 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.141'
+    id 'idea'
+}
+
+version = mod_version
+group = mod_group_id
+
+sourceSets.main.resources {
+    srcDir('src/generated/resources')
+    exclude("**/*.bbmodel")
+    exclude("src/generated/**/.cache")
+}
+
+repositories {
+    mavenCentral()
+    maven { url = "https://maven.createmod.net" }
+    maven { url = "https://maven.ithundxr.dev/snapshots" }
+    maven { url = "https://maven.blamejared.com" }
+    maven { url = "https://api.modrinth.com/maven" }
+}
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        gameTestServer {
+            type = "gameTestServer"
+        }
+        data {
+            data()
+            programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+    javacvRaw
+    bytedecoBundle
+}
+
+def currentOs = System.getProperty("os.name").toLowerCase(Locale.ROOT)
+def currentArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT)
+def bytedecoPlatform = currentOs.contains("win") ? "windows-x86_64" :
+        currentOs.contains("mac") ? (currentArch.contains("aarch64") || currentArch.contains("arm64") ? "macosx-arm64" : "macosx-x86_64") :
+        (currentArch.contains("aarch64") || currentArch.contains("arm64") ? "linux-arm64" : "linux-x86_64")
+
+def strippedJavaCv = tasks.register("strippedJavaCv", Jar) {
+    archiveFileName = "javacv-${javacv_version}-stripped.jar"
+    destinationDirectory = layout.buildDirectory.dir("stripped-libs")
+    from({ configurations.javacvRaw.collect { zipTree(it) } })
+    exclude "module-info.class"
+    exclude "META-INF/versions/*/module-info.class"
+    exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+    manifest {
+        attributes("Automatic-Module-Name": "org.bytedeco.javacv")
+    }
+}
+
+dependencies {
+    implementation("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+    implementation("net.createmod.ponder:ponder-neoforge:${ponder_version}+mc${minecraft_version}")
+    compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
+    runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
+    implementation("com.tterrag.registrate:Registrate:${registrate_version}")
+    implementation("org.jsoup:jsoup:1.18.3")
+    additionalRuntimeClasspath("org.jsoup:jsoup:1.18.3")
+    jarJar("org.jsoup:jsoup:1.18.3")
+
+    javacvRaw("org.bytedeco:javacv:${javacv_version}") { transitive = false }
+    implementation(files(strippedJavaCv))
+    implementation("org.bytedeco:ffmpeg:${ffmpeg_version}")
+    additionalRuntimeClasspath(files(strippedJavaCv))
+    additionalRuntimeClasspath("org.bytedeco:javacpp:${javacv_version}")
+    additionalRuntimeClasspath("org.bytedeco:ffmpeg:${ffmpeg_version}")
+    additionalRuntimeClasspath("org.bytedeco:javacpp:${javacv_version}:${bytedecoPlatform}")
+    additionalRuntimeClasspath("org.bytedeco:ffmpeg:${ffmpeg_version}:${bytedecoPlatform}")
+
+    bytedecoBundle("org.bytedeco:javacpp:${javacv_version}")
+    bytedecoBundle("org.bytedeco:ffmpeg:${ffmpeg_version}")
+
+    ["linux-x86_64", "windows-x86_64", "macosx-x86_64", "macosx-arm64"].each { platform ->
+        bytedecoBundle("org.bytedeco:javacpp:${javacv_version}:${platform}")
+        bytedecoBundle("org.bytedeco:ffmpeg:${ffmpeg_version}:${platform}")
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn strippedJavaCv
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from({ zipTree(strippedJavaCv.get().archiveFile.get().asFile) }) {
+        exclude "module-info.class"
+        exclude "META-INF/versions/*/module-info.class"
+        exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+    }
+    from({ configurations.bytedecoBundle.collect { zipTree(it) } }) {
+        exclude "module-info.class"
+        exclude "META-INF/versions/*/module-info.class"
+        exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+    }
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            neo_version_range      : neo_version_range,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven { url "file://${project.projectDir}/repo" }
+    }
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

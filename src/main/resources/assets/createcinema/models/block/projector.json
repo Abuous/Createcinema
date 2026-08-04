@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "front": "minecraft:block/observer_front",
+    "side": "minecraft:block/deepslate_tiles",
+    "top": "minecraft:block/polished_blackstone"
+  }
+}
