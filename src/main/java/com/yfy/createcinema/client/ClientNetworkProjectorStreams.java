@@ -9,6 +9,7 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 import org.bytedeco.ffmpeg.avutil.AVFrame;
 import org.bytedeco.ffmpeg.swscale.SwsContext;
 import org.bytedeco.javacpp.BytePointer;
@@ -17,7 +18,9 @@ import org.bytedeco.javacpp.PointerPointer;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameGrabber;
+import org.lwjgl.system.MemoryUtil;
 
+import java.lang.reflect.Field;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.net.URI;
@@ -39,10 +42,14 @@ import java.io.InputStream;
 
 public final class ClientNetworkProjectorStreams {
     private static final int MAX_BUFFERED_FRAMES = 64;
+    private static final int MAX_LIVE_BUFFERED_FRAMES = 32;
     private static final double STARTUP_BUFFER_SECONDS = 0.60;
+    private static final double LIVE_PLAYBACK_DELAY_SECONDS = 0.75;
     private static final double MAX_BUFFER_SECONDS = 1.50;
+    private static final double MAX_LIVE_BUFFER_SECONDS = 0.90;
     private static final double HARD_RESYNC_SECONDS = 3.0;
     private static final double DISPLAY_LEAD_SECONDS = 0.035;
+    private static final long LIVE_STOP_GRACE_MILLIS = 1_000L;
     private static final String NETWORK_RW_TIMEOUT_MICROS = "5000000";
     private static final Map<String, Session> SESSIONS = new HashMap<>();
     private static final AtomicInteger NEXT_MEDIA_REVISION = new AtomicInteger();
@@ -58,7 +65,7 @@ public final class ClientNetworkProjectorStreams {
 
     public static NetworkProjectionFrame frame(NetworkProjectorBlockEntity projector, double playTime) {
         if (projector.getLevel() == null || projector.getUrl().isBlank()) return null;
-        String key = projector.getLevel().dimension().location() + "/" + projector.getBlockPos().asLong();
+        String key = sessionKey(projector);
         Session session = SESSIONS.get(key);
         if (session != null && session.failed && System.currentTimeMillis() >= session.retryAt) {
             session.close("retry");
@@ -69,46 +76,72 @@ public final class ClientNetworkProjectorStreams {
         NetworkVideoQuality quality = projector.getQuality();
         if (session == null || !session.url.equals(projector.getUrl())
                 || session.continuousEnabled != continuousEnabled || session.quality != quality) {
-            if (session != null) session.close("projector settings changed");
-            session = new Session(key, projector.getUrl(), continuousEnabled, quality, playTime,
+            if (session != null) {
+                ClientNetworkProjectorAudio.stop(projector);
+                if (DouyinLiveResolver.canResolve(session.url) && !session.url.equals(projector.getUrl())) {
+                    DouyinBrowserBridge.cancelPendingCapture();
+                }
+                session.close("projector settings changed");
+            }
+            session = new Session(key, projector, projector.getUrl(), continuousEnabled, quality, playTime,
                     projector.getNavigationRevision(), projector.getNavigationOffset(), -1, 0);
             SESSIONS.put(key, session);
-        } else if (session.navigationRevision != projector.getNavigationRevision()) {
+        } else if (session.navigationRevision != projector.getNavigationRevision() && session.continuousPlaylist()) {
             int navigationDelta = projector.getNavigationOffset() - session.navigationOffset;
             int requestedIndex = session.playlist == null ? -1 : session.playlistIndex + navigationDelta;
             int startOffset = session.playlist == null ? navigationDelta : 0;
+            ClientNetworkProjectorAudio.stop(projector);
             session.close("playlist navigation");
-            session = new Session(key, projector.getUrl(), continuousEnabled, quality, playTime,
+            session = new Session(key, projector, projector.getUrl(), continuousEnabled, quality, playTime,
                     projector.getNavigationRevision(), projector.getNavigationOffset(), requestedIndex, startOffset);
             SESSIONS.put(key, session);
         }
+        session.resume();
         session.updateTarget(playTime);
         session.lastTouched = System.currentTimeMillis();
         return session.uploadReady();
     }
 
     public static BilibiliResolver.ResolvedMedia source(NetworkProjectorBlockEntity projector) {
+        AudioSource source = audioSource(projector);
+        return source == null ? null : source.media();
+    }
+
+    public static AudioSource audioSource(NetworkProjectorBlockEntity projector) {
         if (projector.getLevel() == null) return null;
-        Session session = SESSIONS.get(projector.getLevel().dimension().location() + "/" + projector.getBlockPos().asLong());
-        return session == null ? null : session.source;
+        Session session = SESSIONS.get(sessionKey(projector));
+        if (session == null || session.closed || session.failed || !session.videoReadyForAudio
+                || !session.url.equals(projector.getUrl()) || session.source == null) {
+            return null;
+        }
+        String key = session.key + "/url/" + session.url + "/" + session.mediaRevision;
+        return new AudioSource(key, session.source);
     }
 
     public static double mediaTime(NetworkProjectorBlockEntity projector) {
         if (projector.getLevel() == null) return projector.getPlayTime();
-        Session session = SESSIONS.get(projector.getLevel().dimension().location() + "/" + projector.getBlockPos().asLong());
+        Session session = SESSIONS.get(sessionKey(projector));
         return session == null ? projector.getPlayTime() : session.mediaTime();
     }
 
     public static int mediaRevision(NetworkProjectorBlockEntity projector) {
         if (projector.getLevel() == null) return 0;
-        Session session = SESSIONS.get(projector.getLevel().dimension().location() + "/" + projector.getBlockPos().asLong());
+        Session session = SESSIONS.get(sessionKey(projector));
         return session == null ? 0 : session.mediaRevision;
     }
 
     public static Status status(BlockPos pos) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return Status.IDLE;
-        Session session = SESSIONS.get(minecraft.level.dimension().location() + "/" + pos.asLong());
+        Session session = SESSIONS.get(sessionKey(minecraft.level, pos));
+        return status(session);
+    }
+
+    public static Status status(NetworkProjectorBlockEntity projector) {
+        return status(projector.getLevel() == null ? null : SESSIONS.get(sessionKey(projector)));
+    }
+
+    private static Status status(Session session) {
         if (session == null) return Status.IDLE;
         if (session.failed) return Status.ERROR;
         if (session.ended) return Status.ENDED;
@@ -121,7 +154,15 @@ public final class ClientNetworkProjectorStreams {
     public static float progress(BlockPos pos) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return 0.0f;
-        Session session = SESSIONS.get(minecraft.level.dimension().location() + "/" + pos.asLong());
+        Session session = SESSIONS.get(sessionKey(minecraft.level, pos));
+        return progress(session);
+    }
+
+    public static float progress(NetworkProjectorBlockEntity projector) {
+        return progress(projector.getLevel() == null ? null : SESSIONS.get(sessionKey(projector)));
+    }
+
+    private static float progress(Session session) {
         if (session == null || session.failed) return 0.0f;
         return Math.max(0.0f, Math.min(1.0f, session.progress));
     }
@@ -129,7 +170,15 @@ public final class ClientNetworkProjectorStreams {
     public static Component message(BlockPos pos) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return Component.empty();
-        Session session = SESSIONS.get(minecraft.level.dimension().location() + "/" + pos.asLong());
+        Session session = SESSIONS.get(sessionKey(minecraft.level, pos));
+        return message(session);
+    }
+
+    public static Component message(NetworkProjectorBlockEntity projector) {
+        return message(projector.getLevel() == null ? null : SESSIONS.get(sessionKey(projector)));
+    }
+
+    private static Component message(Session session) {
         if (session == null) return Component.empty();
         if (session.failed) return session.errorMessage == null
                 ? Component.translatable("gui.createcinema.stream.error_short")
@@ -141,7 +190,7 @@ public final class ClientNetworkProjectorStreams {
     public static Component playlistMessage(BlockPos pos) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return Component.empty();
-        Session session = SESSIONS.get(minecraft.level.dimension().location() + "/" + pos.asLong());
+        Session session = SESSIONS.get(sessionKey(minecraft.level, pos));
         if (session == null || session.playlist == null) return Component.empty();
         int count = session.playlist.entries().size();
         if (count <= 1) return Component.translatable("gui.createcinema.playlist.single");
@@ -167,28 +216,53 @@ public final class ClientNetworkProjectorStreams {
 
     public static void stop(NetworkProjectorBlockEntity projector) {
         if (projector.getLevel() == null) return;
-        String key = projector.getLevel().dimension().location() + "/" + projector.getBlockPos().asLong();
-        Session session = SESSIONS.remove(key);
+        String key = sessionKey(projector);
+        Session session = SESSIONS.get(key);
+        if (session != null && session.retainWhileUnpowered(projector)) return;
+        session = SESSIONS.remove(key);
         if (session != null) session.close("projector stopped");
     }
 
-    public static void sweep() {
-        long cutoff = System.currentTimeMillis() - 60_000L;
+    public static void tick() {
+        long now = System.currentTimeMillis();
+        long cutoff = now - 60_000L;
         SESSIONS.entrySet().removeIf(entry -> {
+            if (entry.getValue().projectorInvalid()) {
+                entry.getValue().close("projector state changed");
+                return true;
+            }
+            if (entry.getValue().liveStopStartedAt > 0L
+                    && now - entry.getValue().liveStopStartedAt >= LIVE_STOP_GRACE_MILLIS) {
+                entry.getValue().close("live projector stop grace expired");
+                return true;
+            }
             if (entry.getValue().lastTouched >= cutoff) return false;
             entry.getValue().close("not rendered for 60 seconds");
             return true;
         });
     }
 
+    private static String sessionKey(NetworkProjectorBlockEntity projector) {
+        return projector.getLevel() == null ? "" : sessionKey(projector.getLevel(), projector.getBlockPos());
+    }
+
+    private static String sessionKey(Level level, BlockPos pos) {
+        return Integer.toUnsignedString(System.identityHashCode(level)) + "/"
+                + level.dimension().location() + "/" + pos.asLong();
+    }
+
     public static void closeAll() {
+        boolean hadDouyinSession = SESSIONS.values().stream().anyMatch(session ->
+                DouyinLiveResolver.canResolve(session.url) || DouyinVideoResolver.canResolve(session.url));
         SESSIONS.values().forEach(session -> session.close("client level cleared"));
         SESSIONS.clear();
         HlsStreamCache.clear();
+        if (hadDouyinSession) DouyinBrowserBridge.cancelPendingCapture();
     }
 
     private static class Session {
         private final String key;
+        private final NetworkProjectorBlockEntity projector;
         private final String url;
         private final boolean continuousEnabled;
         private final NetworkVideoQuality quality;
@@ -199,6 +273,9 @@ public final class ClientNetworkProjectorStreams {
         private volatile double itemStartTime;
         private volatile double duration;
         private volatile long lastTouched = System.currentTimeMillis();
+        private volatile long liveClockStartedAt;
+        private volatile long liveStopStartedAt;
+        private volatile boolean videoReadyForAudio;
         private volatile long decodedFrameCount;
         private long uploadedFrameCount;
         private long lastVideoDiagnosticAt;
@@ -220,10 +297,11 @@ public final class ClientNetworkProjectorStreams {
         private final int requestedPlaylistIndex;
         private final int playlistStartOffset;
 
-        private Session(String key, String url, boolean continuousEnabled, NetworkVideoQuality quality,
+        private Session(String key, NetworkProjectorBlockEntity projector, String url, boolean continuousEnabled, NetworkVideoQuality quality,
                         double playTime, int navigationRevision, int navigationOffset,
                         int requestedPlaylistIndex, int playlistStartOffset) {
             this.key = key;
+            this.projector = projector;
             this.url = url;
             this.continuousEnabled = continuousEnabled;
             this.quality = quality;
@@ -249,6 +327,40 @@ public final class ClientNetworkProjectorStreams {
             targetTime = Math.max(targetTime, playTime);
         }
 
+        private void resume() {
+            liveStopStartedAt = 0L;
+        }
+
+        private boolean retainWhileUnpowered(NetworkProjectorBlockEntity projector) {
+            if (source == null || !source.live() || projector.isRemoved() || !url.equals(projector.getUrl())
+                    || projector.isOverStressed()
+                    || Math.abs(projector.getSpeed()) > 0.0f) {
+                return false;
+            }
+            long now = System.currentTimeMillis();
+            if (liveStopStartedAt == 0L) liveStopStartedAt = now;
+            lastTouched = now;
+            return now - liveStopStartedAt < LIVE_STOP_GRACE_MILLIS;
+        }
+
+        private boolean projectorInvalid() {
+            Level level = projector.getLevel();
+            if (projector.isRemoved() || level == null || level.getBlockEntity(projector.getBlockPos()) != projector) {
+                ClientNetworkProjectorAudio.stop(projector);
+                return true;
+            }
+            if (!url.equals(projector.getUrl())) {
+                ClientNetworkProjectorAudio.stop(projector);
+                return true;
+            }
+            if (projector.canProject()) {
+                resume();
+                return false;
+            }
+            ClientNetworkProjectorAudio.stop(projector);
+            return !retainWhileUnpowered(projector);
+        }
+
         private void decode() {
             boolean advance = false;
             boolean reconnect = false;
@@ -270,13 +382,15 @@ public final class ClientNetworkProjectorStreams {
                         ? playlist.entries().get(playlistIndex).url() : url;
                 source = BilibiliResolver.resolve(mediaUrl, quality);
                 if (closed) return;
+                videoReadyForAudio = false;
+                if (source.live()) liveClockStartedAt = 0L;
                 progress = 0.38f;
-                boolean hlsUrl = HlsStreamCache.isHls(source.videoUrl());
+                boolean hlsUrl = !source.live() && HlsStreamCache.isHls(source.videoUrl());
                 if (hlsUrl && !HlsStreamCache.isPrepared(source.videoUrl())) {
                     HlsStreamCache.prepare(source.videoUrl(), source.referer());
                 }
                 boolean hls = hlsUrl && HlsStreamCache.isPrepared(source.videoUrl());
-                double knownDuration = source.durationSeconds() > 0.0 ? source.durationSeconds()
+                double knownDuration = source.live() ? 0.0 : source.durationSeconds() > 0.0 ? source.durationSeconds()
                         : hls ? HlsStreamCache.duration(source.videoUrl()) : 0.0;
                 double requestedStart = wrap(playbackTime(), knownDuration);
                 double streamStart = hls ? HlsStreamCache.segmentStart(source.videoUrl(), requestedStart) : 0.0;
@@ -296,14 +410,22 @@ public final class ClientNetworkProjectorStreams {
                     grabber.setImageMode(FrameGrabber.ImageMode.RAW);
                     grabber.start();
                     if (closed) return;
+                    if (source.live()) {
+                        CreateCinema.LOGGER.info(
+                                "Opened live video stream: format={} videoCodec={} {}x{} audioCodec={}",
+                                grabber.getFormat(), grabber.getVideoCodecName(),
+                                grabber.getImageWidth(), grabber.getImageHeight(), grabber.getAudioCodecName());
+                    }
                     progress = 0.60f;
-                    duration = source.durationSeconds() > 0.0 ? source.durationSeconds()
+                    duration = source.live() ? 0.0 : source.durationSeconds() > 0.0 ? source.durationSeconds()
                             : hls ? HlsStreamCache.duration(source.videoUrl())
                             : grabber.getLengthInTime() / 1_000_000.0;
                     double startTime = wrap(playbackTime(), duration);
-                    if (!hls && duration > 0.0) grabber.setTimestamp((long) (startTime * 1_000_000.0));
+                    if (!source.live() && !hls && duration > 0.0) {
+                        grabber.setTimestamp((long) (startTime * 1_000_000.0));
+                    }
                     long containerStartMicros = grabber.getFormatContext().start_time();
-                    double timestampOrigin = hls || containerStartMicros == AV_NOPTS_VALUE ? Double.NaN
+                    double timestampOrigin = source.live() || hls || containerStartMicros == AV_NOPTS_VALUE ? Double.NaN
                             : containerStartMicros / 1_000_000.0;
                     progress = 0.72f;
                     double nextPublishTimestamp = -1.0;
@@ -332,6 +454,9 @@ public final class ClientNetworkProjectorStreams {
                             nextPublishTimestamp = -1.0;
                             continue;
                         }
+                        if (source.live() && liveClockStartedAt == 0L) {
+                            liveClockStartedAt = System.nanoTime();
+                        }
                         double rawTimestamp = frame.timestamp / 1_000_000.0;
                         if (Double.isNaN(timestampOrigin)) {
                             timestampOrigin = rawTimestamp - (hls ? streamStart : startTime);
@@ -348,6 +473,13 @@ public final class ClientNetworkProjectorStreams {
                         while (!closed) {
                             double masterTime = wrap(playbackTime(), duration);
                             double drift = mediaDelta(timestamp, masterTime, duration);
+                            if (source.live() && drift < -HARD_RESYNC_SECONDS) {
+                                clearBufferedFrames(true);
+                                liveClockStartedAt = System.nanoTime()
+                                        - (long) ((timestamp + LIVE_PLAYBACK_DELAY_SECONDS) * 1_000_000_000.0);
+                                nextPublishTimestamp = -1.0;
+                                break;
+                            }
                             if (!hls && duration > 0.0 && drift < -HARD_RESYNC_SECONDS) {
                                 clearBufferedFrames(true);
                                 grabber.setTimestamp((long) (masterTime * 1_000_000.0));
@@ -355,7 +487,8 @@ public final class ClientNetworkProjectorStreams {
                                 nextPublishTimestamp = -1.0;
                                 continue decodeLoop;
                             }
-                            if (drift <= MAX_BUFFER_SECONDS) break;
+                            double maxBufferSeconds = source.live() ? MAX_LIVE_BUFFER_SECONDS : MAX_BUFFER_SECONDS;
+                            if (drift <= maxBufferSeconds) break;
                             Thread.sleep(4L);
                         }
                         if (mediaDelta(timestamp, wrap(playbackTime(), duration), duration) < -0.12) continue;
@@ -379,6 +512,7 @@ public final class ClientNetworkProjectorStreams {
                 if (!closed) {
                     progress = 0.0f;
                     failed = true;
+                    videoReadyForAudio = false;
                     errorMessage = visibleError(url, error);
                     String details = nestedMessage(error).toLowerCase(java.util.Locale.ROOT);
                     boolean configurationFailure = details.contains("douyin cookie is not configured")
@@ -415,6 +549,7 @@ public final class ClientNetworkProjectorStreams {
             itemStartTime = targetTime;
             duration = 0.0;
             source = null;
+            videoReadyForAudio = false;
             clearBufferedFrames(true);
             progress = 0.18f;
             CreateCinema.LOGGER.debug("Advancing network playlist {} to {}/{}", url,
@@ -426,6 +561,7 @@ public final class ClientNetworkProjectorStreams {
             ended = true;
             mediaRevision = NEXT_MEDIA_REVISION.incrementAndGet();
             source = null;
+            videoReadyForAudio = false;
             clearBufferedFrames(false);
             progress = 1.0f;
         }
@@ -433,6 +569,7 @@ public final class ClientNetworkProjectorStreams {
         private void reconnectLiveStream() {
             mediaRevision = NEXT_MEDIA_REVISION.incrementAndGet();
             source = null;
+            videoReadyForAudio = false;
             duration = 0.0;
             clearBufferedFrames(true);
             progress = 0.18f;
@@ -469,6 +606,9 @@ public final class ClientNetworkProjectorStreams {
             if (message.contains("douyin recommendation authorization")
                     || message.contains("douyin authenticated") || message.contains("requires verification")) {
                 return Component.translatable("gui.createcinema.stream.error.douyin_cookie_invalid");
+            }
+            if (DouyinLiveResolver.canResolve(url) && message.contains("capture timed out")) {
+                return Component.translatable("gui.createcinema.stream.error_short");
             }
             if (DouyinLiveResolver.canResolve(url)) {
                 return Component.translatable("gui.createcinema.stream.error.douyin_live_auth");
@@ -549,7 +689,8 @@ public final class ClientNetworkProjectorStreams {
             while (!closed) {
                 synchronized (bufferedFrames) {
                     if (closed) break;
-                    if (bufferedFrames.size() < MAX_BUFFERED_FRAMES) {
+                    int maxFrames = source != null && source.live() ? MAX_LIVE_BUFFERED_FRAMES : MAX_BUFFERED_FRAMES;
+                    if (bufferedFrames.size() < maxFrames) {
                         bufferedFrames.addLast(frame);
                         decodedFrameCount++;
                         if (!bufferReady) {
@@ -571,6 +712,7 @@ public final class ClientNetworkProjectorStreams {
             synchronized (bufferedFrames) {
                 if (!bufferedFrames.isEmpty()) {
                     bufferReady = true;
+                    videoReadyForAudio = true;
                     progress = 0.95f;
                 }
             }
@@ -588,6 +730,11 @@ public final class ClientNetworkProjectorStreams {
         }
 
         private double playbackTime() {
+            if (source != null && source.live()) {
+                if (liveClockStartedAt == 0L) return 0.0;
+                return Math.max(0.0, (System.nanoTime() - liveClockStartedAt) / 1_000_000_000.0
+                        - LIVE_PLAYBACK_DELAY_SECONDS);
+            }
             return Math.max(0.0, targetTime - itemStartTime);
         }
 
@@ -616,6 +763,7 @@ public final class ClientNetworkProjectorStreams {
         private void close(String reason) {
             if (closed) return;
             closed = true;
+            videoReadyForAudio = false;
             CreateCinema.LOGGER.debug("Closed network stream session {} revision {}: {}", url, mediaRevision, reason);
             clearBufferedFrames(false);
             if (textureLocation != null) Minecraft.getInstance().getTextureManager().release(textureLocation);
@@ -636,6 +784,7 @@ public final class ClientNetworkProjectorStreams {
     }
 
     private static class NativeFrameScaler implements AutoCloseable {
+        private static final Field NATIVE_IMAGE_PIXELS = findNativeImagePixels();
         private SwsContext context;
         private BytePointer output;
         private PointerPointer<BytePointer> outputPlanes;
@@ -660,15 +809,32 @@ public final class ClientNetworkProjectorStreams {
 
             NativeImage image = new NativeImage(targetWidth, targetHeight, false);
             try {
-                IntBuffer pixels = output.position(0).capacity((long) targetWidth * targetHeight * 4L)
-                        .asByteBuffer().order(ByteOrder.nativeOrder()).asIntBuffer();
-                for (int y = 0; y < targetHeight; y++) {
-                    for (int x = 0; x < targetWidth; x++) image.setPixelRGBA(x, y, pixels.get());
+                long byteCount = (long) targetWidth * targetHeight * 4L;
+                output.position(0);
+                if (NATIVE_IMAGE_PIXELS != null) {
+                    MemoryUtil.memCopy(output.address(), NATIVE_IMAGE_PIXELS.getLong(image), byteCount);
+                } else {
+                    IntBuffer pixels = output.position(0).capacity(byteCount)
+                            .asByteBuffer().order(ByteOrder.nativeOrder()).asIntBuffer();
+                    for (int y = 0; y < targetHeight; y++) {
+                        for (int x = 0; x < targetWidth; x++) image.setPixelRGBA(x, y, pixels.get());
+                    }
                 }
                 return new DecodedFrame(targetWidth, targetHeight, image);
             } catch (Throwable error) {
                 image.close();
-                throw error;
+                if (error instanceof IOException io) throw io;
+                throw new IOException("Could not copy a decoded video frame", error);
+            }
+        }
+
+        private static Field findNativeImagePixels() {
+            try {
+                Field field = NativeImage.class.getDeclaredField("pixels");
+                field.setAccessible(true);
+                return field;
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                return null;
             }
         }
 
@@ -724,6 +890,9 @@ public final class ClientNetworkProjectorStreams {
         private DecodedFrame(int width, int height, NativeImage image) {
             this(width, height, image, 0.0);
         }
+    }
+
+    public record AudioSource(String key, BilibiliResolver.ResolvedMedia media) {
     }
 
     public enum Status {

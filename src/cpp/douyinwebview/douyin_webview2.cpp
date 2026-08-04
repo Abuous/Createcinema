@@ -383,13 +383,27 @@ private:
                                                          controller_->put_Bounds(bounds);
                                                          controller_->put_IsVisible(FALSE);
                                                          HRESULT interfaceResult = webview_.As(&webview2_);
-                                                         if (FAILED(interfaceResult) || !webview2_) {
-                                                             signalStartupFailure(
-                                                                     "The installed WebView2 Runtime is too old: " +
-                                                                     hresultMessage(interfaceResult));
-                                                             return S_OK;
-                                                         }
-                                                         EventRegistrationToken token{};
+                                                          if (FAILED(interfaceResult) || !webview2_) {
+                                                              signalStartupFailure(
+                                                                      "The installed WebView2 Runtime is too old: " +
+                                                                      hresultMessage(interfaceResult));
+                                                              return S_OK;
+                                                          }
+                                                          ComPtr<ICoreWebView2_8> webview8;
+                                                          HRESULT muteInterfaceResult = webview_.As(&webview8);
+                                                          if (FAILED(muteInterfaceResult) || !webview8) {
+                                                              signalStartupFailure(
+                                                                      "The installed WebView2 Runtime cannot mute browser audio: " +
+                                                                      hresultMessage(muteInterfaceResult));
+                                                              return S_OK;
+                                                          }
+                                                          HRESULT muteResult = webview8->put_IsMuted(TRUE);
+                                                          if (FAILED(muteResult)) {
+                                                              signalStartupFailure("Could not mute WebView2 audio: " +
+                                                                                   hresultMessage(muteResult));
+                                                              return S_OK;
+                                                          }
+                                                          EventRegistrationToken token{};
                                                          HRESULT eventResult = webview2_->add_WebResourceResponseReceived(
                                                                  Callback<ICoreWebView2WebResourceResponseReceivedEventHandler>(
                                                                          [this](ICoreWebView2*,

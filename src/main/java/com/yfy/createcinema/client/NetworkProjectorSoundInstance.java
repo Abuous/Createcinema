@@ -1,5 +1,6 @@
 package com.yfy.createcinema.client;
 
+import com.mojang.blaze3d.audio.Channel;
 import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.PlaybackSpeeds;
 import com.yfy.createcinema.audio.CinemaAudioNetwork;
@@ -12,7 +13,9 @@ import net.minecraft.client.resources.sounds.Sound;
 import net.minecraft.client.resources.sounds.SoundInstance;
 import net.minecraft.client.resources.sounds.TickableSoundInstance;
 import net.minecraft.client.sounds.AudioStream;
+import net.minecraft.client.sounds.ChannelAccess;
 import net.minecraft.client.sounds.SoundBufferLibrary;
+import net.minecraft.client.sounds.SoundEngine;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.core.BlockPos;
@@ -22,7 +25,9 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.util.valueproviders.ConstantFloat;
 import net.minecraft.world.phys.Vec3;
 
+import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 
 public class NetworkProjectorSoundInstance extends AbstractSoundInstance implements TickableSoundInstance {
@@ -32,10 +37,13 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     private final BlockPos speakerPos;
     private final NetworkProjectorBlockEntity projector;
     private final String url;
+    private final String sourceKey;
     private final BilibiliResolver.ResolvedMedia sourceMedia;
+    private final SharedNetworkAudio sharedAudio;
     private volatile double latestPlayTime;
     private volatile double streamStartTime = Double.NaN;
-    private volatile NetworkFfmpegAudioStream audioStream;
+    private volatile AudioStream audioStream;
+    private volatile ChannelAccess.ChannelHandle channelHandle;
     private volatile boolean channelStarted;
     private volatile long channelStartedNanos;
     private int connectionCheck;
@@ -43,20 +51,23 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     private double expectedTime;
     private long audioClockNanos;
     private int driftTicks;
-    private boolean stopped;
+    private volatile boolean stopped;
 
     public NetworkProjectorSoundInstance(NetworkProjectorBlockEntity projector, BlockPos speaker,
-                                         BilibiliResolver.ResolvedMedia sourceMedia) {
+                                         ClientNetworkProjectorStreams.AudioSource source,
+                                         SharedNetworkAudio sharedAudio) {
         super(soundLocation(projector.getBlockPos(), speaker), SoundSource.RECORDS, RandomSource.create());
         projectorPos = projector.getBlockPos().immutable();
         speakerPos = speaker.immutable();
         this.projector = projector;
         url = projector.getUrl();
-        this.sourceMedia = sourceMedia;
+        sourceKey = source.key();
+        sourceMedia = source.media();
+        this.sharedAudio = sharedAudio;
         latestPlayTime = ClientNetworkProjectorStreams.mediaTime(projector);
         updatePosition();
         volume = projector.getLevel() == null ? 0.0f : SpeakerBlock.redstoneVolume(projector.getLevel(), speakerPos);
-        pitch = playbackRate(projector);
+        pitch = playbackRate(projector, sourceMedia);
         attenuation = SoundInstance.Attenuation.LINEAR;
         sound = new Sound(location, ConstantFloat.of(1.0f), ConstantFloat.of(1.0f), 1,
                 Sound.Type.FILE, true, false, 32);
@@ -73,13 +84,31 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     public CompletableFuture<AudioStream> getStream(SoundBufferLibrary buffers, Sound sound, boolean looping) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                NetworkFfmpegAudioStream stream = new NetworkFfmpegAudioStream(sourceMedia,
-                        () -> wrap(latestPlayTime, sourceMedia.durationSeconds()));
+                if (stopped || !ClientNetworkProjectorAudio.isCurrent(sourceKey, speakerPos, this)) {
+                    throw new CancellationException("Network audio source stopped before opening");
+                }
+                AudioStream stream;
+                if (sourceMedia.live()) {
+                    SharedNetworkAudio.Tap tap = sharedAudio.openTap();
+                    stream = tap;
+                    streamStartTime = tap.startTime();
+                } else {
+                    NetworkFfmpegAudioStream direct = new NetworkFfmpegAudioStream(sourceMedia,
+                            () -> wrap(latestPlayTime, sourceMedia.durationSeconds()));
+                    stream = direct;
+                    streamStartTime = direct.startTime();
+                }
                 audioStream = stream;
-                streamStartTime = stream.startTime();
-                if (stopped) stream.close();
+                if (stopped || !ClientNetworkProjectorAudio.isCurrent(sourceKey, speakerPos, this)) {
+                    stream.close();
+                    throw new CancellationException("Network audio source was replaced while opening");
+                }
                 return stream;
+            } catch (CancellationException error) {
+                throw error;
             } catch (Exception e) {
+                CreateCinema.LOGGER.warn("Failed to open {} network audio for {}",
+                        sourceMedia.live() ? "live" : "video", url, e);
                 throw new CompletionException(e);
             }
         }, Util.nonCriticalIoPool());
@@ -94,23 +123,26 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
                 || !projector.getLevel().dimension().equals(minecraft.level.dimension())
                 || !projector.canProject() || !url.equals(projector.getUrl())
                 || minecraft.player.distanceToSqr(x, y, z) > 96.0 * 96.0) {
-            stopped = true;
+            stopInstance();
+            return;
+        }
+        ClientNetworkProjectorStreams.AudioSource activeSource = ClientNetworkProjectorStreams.audioSource(projector);
+        if (activeSource == null || !sourceKey.equals(activeSource.key())) {
+            stopInstance();
             return;
         }
         latestPlayTime = ClientNetworkProjectorStreams.mediaTime(projector);
-        pitch = playbackRate(projector);
+        pitch = playbackRate(projector, sourceMedia);
         volume = SpeakerBlock.redstoneVolume(projector.getLevel(), speakerPos);
-        NetworkFfmpegAudioStream activeStream = audioStream;
-        if (activeStream != null && activeStream.insertedSilenceSeconds() > 0.5) {
-            CreateCinema.LOGGER.debug("Restarting network audio {} after {}s decoder starvation", url,
-                    String.format(java.util.Locale.ROOT, "%.3f", activeStream.insertedSilenceSeconds()));
-            stopped = true;
+        if (sharedAudio != null && sharedAudio.failure() != null) {
+            CreateCinema.LOGGER.debug("Stopping network audio {} after shared decoder failure", url, sharedAudio.failure());
+            stopInstance();
             return;
         }
         if (--connectionCheck <= 0) {
             connectionCheck = 10;
             if (!CinemaAudioNetwork.isConnected(projector.getLevel(), projectorPos, speakerPos)) {
-                stopped = true;
+                stopInstance();
                 return;
             }
         }
@@ -129,6 +161,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         double elapsed = Math.max(0.0, (now - audioClockNanos) / 1_000_000_000.0);
         expectedTime = wrap(expectedTime + elapsed * pitch, sourceMedia.durationSeconds());
         audioClockNanos = now;
+        if (sourceMedia.live()) return;
         double drift = circularDistance(expectedTime, latestPlayTime, sourceMedia.durationSeconds());
         driftTicks = drift > RESYNC_THRESHOLD_SECONDS ? driftTicks + 1 : 0;
         if (driftTicks >= RESYNC_CONFIRM_TICKS) {
@@ -136,7 +169,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
                     String.format(java.util.Locale.ROOT, "%.3f", drift),
                     String.format(java.util.Locale.ROOT, "%.3f", expectedTime),
                     String.format(java.util.Locale.ROOT, "%.3f", latestPlayTime));
-            stopped = true;
+            stopInstance();
         }
     }
 
@@ -151,10 +184,40 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     }
 
     public void requestStop() {
-        stopped = true;
+        stopInstance();
     }
 
-    public void onChannelStarted() {
+    private void stopInstance() {
+        if (stopped) return;
+        stopped = true;
+        CreateCinema.LOGGER.debug("Stopping network audio {}", url);
+        ChannelAccess.ChannelHandle handle = channelHandle;
+        if (handle != null) handle.execute(Channel::stop);
+        AudioStream stream = audioStream;
+        if (stream != null) CompletableFuture.runAsync(() -> {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+            }
+        }, Util.nonCriticalIoPool());
+    }
+
+    public void onChannelStarted(SoundEngine engine, Channel channel) {
+        ChannelAccess.ChannelHandle handle = engine.instanceToChannel.get(this);
+        channelHandle = handle;
+        if (stopped) {
+            if (handle != null) handle.execute(Channel::stop);
+            else channel.stop();
+            AudioStream stream = audioStream;
+            if (stream != null) CompletableFuture.runAsync(() -> {
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                }
+            }, Util.nonCriticalIoPool());
+            CreateCinema.LOGGER.debug("Stopped late network audio channel for {}", url);
+            return;
+        }
         channelStartedNanos = System.nanoTime();
         channelStarted = true;
         CreateCinema.LOGGER.debug("Started network audio {} at {}s", url,
@@ -168,8 +231,9 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         z = position.z;
     }
 
-    private static float playbackRate(NetworkProjectorBlockEntity projector) {
-        return PlaybackSpeeds.rate(projector.getSpeed());
+    private static float playbackRate(NetworkProjectorBlockEntity projector,
+                                      BilibiliResolver.ResolvedMedia source) {
+        return source.live() ? 1.0f : PlaybackSpeeds.rate(projector.getSpeed());
     }
 
     private static double wrap(double value, double duration) {

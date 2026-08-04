@@ -2,8 +2,11 @@
   "textures": { "cable": "createcinema:block/cable", "particle": "createcinema:block/cable" },
   "elements": [
     { "from": [6, 10, 6], "to": [10, 16, 10], "faces": {
-      "north": { "texture": "#cable" }, "south": { "texture": "#cable" },
-      "west": { "texture": "#cable" }, "east": { "texture": "#cable" }
+      "up": { "texture": "#cable", "uv": [6, 0, 10, 16] },
+      "north": { "texture": "#cable", "uv": [6, 0, 10, 16] },
+      "south": { "texture": "#cable", "uv": [6, 0, 10, 16] },
+      "west": { "texture": "#cable", "uv": [6, 0, 10, 16] },
+      "east": { "texture": "#cable", "uv": [6, 0, 10, 16] }
     } }
   ]
 }

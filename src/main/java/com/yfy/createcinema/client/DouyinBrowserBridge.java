@@ -35,9 +35,9 @@ final class DouyinBrowserBridge {
     private static final String LIVE_PATH = "/webcast/room/web/enter/";
     private static final Pattern AWEME_ID = Pattern.compile("[0-9]{1,32}");
     private static final Pattern WEB_RID = Pattern.compile("[A-Za-z0-9_-]{2,64}");
-    private static final Duration CAPTURE_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration CAPTURE_TIMEOUT = Duration.ofSeconds(12);
     private static final int MAX_BODY_BYTES = 64 * 1024 * 1024;
-    private static final long LOCK_TIMEOUT_MILLIS = 2_000L;
+    private static final long LOCK_TIMEOUT_MILLIS = 15_000L;
     private static final ReentrantLock CAPTURE_LOCK = new ReentrantLock(true);
     private static final AtomicLong GENERATION = new AtomicLong();
 
@@ -70,7 +70,7 @@ final class DouyinBrowserBridge {
     }
 
     static JsonObject captureFeed() throws IOException {
-        return capture(HOME_URL, "www.douyin.com", FEED_PATHS, null, null);
+        return capture(HOME_URL, "www.douyin.com", FEED_PATHS, null, null, false);
     }
 
     static JsonObject captureRecommendations(String awemeId) throws IOException {
@@ -78,15 +78,15 @@ final class DouyinBrowserBridge {
             throw new IllegalArgumentException("Douyin aweme id must contain only digits");
         }
         return capture("https://www.douyin.com/video/" + awemeId,
-                "www.douyin.com", List.of(RELATED_PATH), "aweme_id", awemeId);
+                "www.douyin.com", List.of(RELATED_PATH), "aweme_id", awemeId, false);
     }
 
     static JsonObject captureLive(String webRid) throws IOException {
         if (webRid == null || !WEB_RID.matcher(webRid).matches()) {
             throw new IllegalArgumentException("Douyin live room id is invalid");
         }
-        return capture("https://live.douyin.com/" + webRid,
-                "live.douyin.com", List.of(LIVE_PATH), "web_rid", webRid);
+        return capture("https://live.douyin.com/" + webRid + "?createcinema_capture=" + System.nanoTime(),
+                "live.douyin.com", List.of(LIVE_PATH), "web_rid", webRid, true);
     }
 
     static Status status() {
@@ -109,6 +109,19 @@ final class DouyinBrowserBridge {
         }
     }
 
+    static void cancelPendingCapture() {
+        GENERATION.incrementAndGet();
+        detectLoginCompletion = false;
+        currentStatus = Status.STOPPED;
+        if (!nativeInitialized) return;
+        nativeInitialized = false;
+        try {
+            DouyinWebView2Native.shutdown();
+        } catch (RuntimeException | LinkageError error) {
+            CreateCinema.LOGGER.debug("CreateCinema WebView2: capture cancellation failed", error);
+        }
+    }
+
     static void close() {
         GENERATION.incrementAndGet();
         closing = true;
@@ -126,11 +139,15 @@ final class DouyinBrowserBridge {
     }
 
     private static JsonObject capture(String navigationUrl, String expectedHost,
-                                      List<String> expectedPaths, String expectedQueryName,
-                                      String expectedQueryValue) throws IOException {
+                                       List<String> expectedPaths, String expectedQueryName,
+                                       String expectedQueryValue, boolean freshWebView) throws IOException {
         long generation = GENERATION.get();
         acquireCaptureLock(generation);
         try {
+            if (freshWebView && nativeInitialized) {
+                nativeInitialized = false;
+                DouyinWebView2Native.shutdown();
+            }
             ensureWebView(generation);
             CreateCinema.LOGGER.debug("CreateCinema WebView2: capture starting, host={}", expectedHost);
             byte[] body;
@@ -152,12 +169,24 @@ final class DouyinBrowserBridge {
             CreateCinema.LOGGER.info("CreateCinema WebView2: capture ok, host={}", expectedHost);
             return captured;
         } catch (CaptureUnavailableException error) {
+            if (generation != GENERATION.get()) {
+                throw new IOException("Douyin browser capture was cancelled", error);
+            }
+            if (error.getMessage() != null && error.getMessage().contains("before timeout")) {
+                detectLoginCompletion = false;
+                setStatus(generation, Status.READY);
+                CreateCinema.LOGGER.warn("CreateCinema WebView2: live capture timed out; it will be retried");
+                throw new IOException("Douyin browser live capture timed out", error);
+            }
             detectLoginCompletion = false;
             setStatus(generation, Status.WAITING_LOGIN);
             CreateCinema.LOGGER.warn("CreateCinema WebView2: capture unavailable: {}", error.getMessage());
             throw new IOException(
                     "Douyin browser feed or recommendations unavailable; the page requires verification", error);
         } catch (IOException error) {
+            if (generation != GENERATION.get()) {
+                throw new IOException("Douyin browser capture was cancelled", error);
+            }
             detectLoginCompletion = false;
             setStatus(generation, Status.FAILED);
             CreateCinema.LOGGER.error("CreateCinema WebView2: capture failed: {}", error.getMessage());

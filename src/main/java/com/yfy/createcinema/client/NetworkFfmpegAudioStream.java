@@ -1,5 +1,6 @@
 package com.yfy.createcinema.client;
 
+import com.yfy.createcinema.CreateCinema;
 import net.minecraft.client.sounds.AudioStream;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
@@ -17,6 +18,7 @@ import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.DoubleSupplier;
@@ -27,15 +29,18 @@ public class NetworkFfmpegAudioStream implements AudioStream {
     private static final int STARTUP_WAIT_TIMEOUT_MILLIS = 2_000;
     private static final int MAX_BUFFERED_PCM_MILLIS = 4_000;
     private static final int READ_WAIT_MILLIS = 50;
+    private static final int LIVE_READ_WAIT_MILLIS = 200;
 
     private final FFmpegFrameGrabber grabber;
     private final AudioFormat format;
     private final double duration;
     private final double startTime;
     private final InputStream input;
+    private final boolean live;
     private final ArrayBlockingQueue<ByteBuffer> decoded = new ArrayBlockingQueue<>(MAX_BUFFERED_PCM_CHUNKS);
     private final AtomicInteger bufferedBytes = new AtomicInteger();
-    private final AtomicLong silentBytes = new AtomicLong();
+    private final AtomicLong consecutiveSilentBytes = new AtomicLong();
+    private final AtomicBoolean resourcesClosed = new AtomicBoolean();
     private final Thread decoderThread;
 
     private ByteBuffer pending = ByteBuffer.allocate(0);
@@ -49,7 +54,8 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         InputStream openedInput = null;
         try {
             ClientVideoBurner.awaitFfmpeg();
-            boolean hlsUrl = HlsStreamCache.isHls(source.audioUrl());
+            live = source.live();
+            boolean hlsUrl = !live && HlsStreamCache.isHls(source.audioUrl());
             if (hlsUrl && !HlsStreamCache.isPrepared(source.audioUrl())) HlsStreamCache.prepare(source.audioUrl(), source.referer());
             boolean hls = hlsUrl && HlsStreamCache.isPrepared(source.audioUrl());
             double requestedStart = wrap(startSeconds.getAsDouble(), source.durationSeconds());
@@ -61,7 +67,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
             opened.setVideoStream(-1);
             opened.start();
             double cachedDuration = HlsStreamCache.duration(source.audioUrl());
-            double resolvedDuration = source.durationSeconds() > 0 ? source.durationSeconds()
+            double resolvedDuration = live ? 0.0 : source.durationSeconds() > 0 ? source.durationSeconds()
                     : cachedDuration > 0 ? cachedDuration : opened.getLengthInTime() / 1_000_000.0;
             if (hls) {
                 double corrected = wrap(startSeconds.getAsDouble(), resolvedDuration);
@@ -81,19 +87,27 @@ public class NetworkFfmpegAudioStream implements AudioStream {
             input = openedInput;
             duration = resolvedDuration;
             double currentStart = wrap(hlsUrl ? requestedStart : startSeconds.getAsDouble(), duration);
-            if (!hlsUrl && currentStart > 0) grabber.setTimestamp((long) (currentStart * 1_000_000));
+            if (!live && !hlsUrl && currentStart > 0) grabber.setTimestamp((long) (currentStart * 1_000_000));
             int sampleRate = grabber.getSampleRate() > 0 ? grabber.getSampleRate() : 48_000;
             format = new AudioFormat(sampleRate, 16, Math.max(1, Math.min(2, grabber.getAudioChannels())), true, false);
+            if (live) {
+                CreateCinema.LOGGER.info("Opened live audio stream: format={} audioCodec={} sampleRate={} channels={}",
+                        grabber.getFormat(), grabber.getAudioCodecName(), sampleRate, format.getChannels());
+            }
             if (hls) {
                 discardFrames = Math.max(0, Math.round((requestedStart
                         - HlsStreamCache.segmentStart(source.audioUrl(), requestedStart)) * sampleRate));
-            } else if (currentStart > 0) exactStartSeconds = currentStart;
+            } else if (!live && currentStart > 0) exactStartSeconds = currentStart;
             decoderThread = new Thread(this::decodeAudio, "CreateCinema Network Audio Decode");
             decoderThread.setDaemon(true);
             decoderThread.start();
             waitForStartupBuffer();
-            double catchUpSeconds = forwardDelta(wrap(startSeconds.getAsDouble(), duration), currentStart, duration);
-            startTime = wrap(currentStart + discardBufferedSeconds(catchUpSeconds), duration);
+            if (live) {
+                startTime = Math.max(0.0, startSeconds.getAsDouble());
+            } else {
+                double catchUpSeconds = forwardDelta(wrap(startSeconds.getAsDouble(), duration), currentStart, duration);
+                startTime = wrap(currentStart + discardBufferedSeconds(catchUpSeconds), duration);
+            }
         } catch (Exception e) {
             if (opened != null) try { opened.close(); } catch (Exception ignored) { }
             if (openedInput != null) try { openedInput.close(); } catch (IOException ignored) { }
@@ -110,8 +124,12 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         return startTime;
     }
 
-    public double insertedSilenceSeconds() {
-        return silentBytes.get() / (double) Math.max(1, bytesForMillis(1_000));
+    public double consecutiveSilenceSeconds() {
+        return consecutiveSilentBytes.get() / (double) Math.max(1, bytesForMillis(1_000));
+    }
+
+    public boolean decoderEnded() {
+        return decoderEnded;
     }
 
     @Override
@@ -120,6 +138,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         try {
             while (output.hasRemaining() && !closed) {
                 if (pending.hasRemaining()) {
+                    consecutiveSilentBytes.set(0L);
                     int count = Math.min(output.remaining(), pending.remaining());
                     int limit = pending.limit();
                     pending.limit(pending.position() + count);
@@ -127,7 +146,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
                     pending.limit(limit);
                     continue;
                 }
-                ByteBuffer next = pollDecoded(!decoderEnded ? READ_WAIT_MILLIS : 0);
+                ByteBuffer next = pollDecoded(!decoderEnded ? live ? LIVE_READ_WAIT_MILLIS : READ_WAIT_MILLIS : 0);
                 if (next == null) {
                     fillSilence(output);
                     break;
@@ -150,7 +169,10 @@ public class NetworkFfmpegAudioStream implements AudioStream {
                 ByteBuffer pcm = convert(frame, format.getChannels());
                 enqueueDecoded(pcm);
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable error) {
+            if (!closed) {
+                CreateCinema.LOGGER.warn("Network audio decoder stopped{}", live ? " for a live stream" : "", error);
+            }
         } finally {
             decoderEnded = true;
             closeResources();
@@ -212,7 +234,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
     }
 
     private void fillSilence(ByteBuffer output) {
-        silentBytes.addAndGet(output.remaining());
+        consecutiveSilentBytes.addAndGet(output.remaining());
         while (output.hasRemaining()) output.put((byte) 0);
     }
 
@@ -221,7 +243,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         while (!closed && (frame = grabber.grabSamples()) != null) {
             if (frame.samples != null && frame.samples.length > 0 && trimDiscardedSamples(frame)) return frame;
         }
-        if (!closed) {
+        if (!closed && !live) {
             try {
                 grabber.setTimestamp(0);
                 while (!closed && (frame = grabber.grabSamples()) != null) {
@@ -296,9 +318,11 @@ public class NetworkFfmpegAudioStream implements AudioStream {
         decoderThread.interrupt();
         decoded.clear();
         bufferedBytes.set(0);
+        closeResources();
     }
 
     private void closeResources() {
+        if (!resourcesClosed.compareAndSet(false, true)) return;
         try {
             grabber.close();
         } catch (Exception ignored) {
@@ -309,6 +333,7 @@ public class NetworkFfmpegAudioStream implements AudioStream {
             } catch (IOException ignored) {
             }
         }
+        CreateCinema.LOGGER.debug("Closed {} network audio stream", live ? "live" : "video");
     }
 
     private static double wrap(double value, double duration) {

@@ -63,11 +63,17 @@ final class DouyinLiveResolver {
         addFlatCandidates(candidates, object(streamUrl, "flv_pull_url"));
         if (candidates.isEmpty()) throw new IOException("Douyin Live returned no compatible FLV stream");
 
+        List<LiveCandidate> avc = candidates.stream().filter(LiveCandidate::avc).toList();
+        if (!avc.isEmpty()) candidates = avc;
+
         int targetLong = Math.max(quality.maxWidth(), quality.maxHeight());
         List<LiveCandidate> fitting = candidates.stream()
                 .filter(candidate -> candidate.longEdge > 0 && candidate.longEdge <= targetLong).toList();
         List<LiveCandidate> pool = fitting.isEmpty() ? candidates : fitting;
-        return pool.stream().max(Comparator.comparingLong(LiveCandidate::score)).orElseThrow();
+        LiveCandidate selected = pool.stream().max(Comparator.comparingLong(LiveCandidate::score)).orElseThrow();
+        com.yfy.createcinema.CreateCinema.LOGGER.debug("Selected Douyin Live {} stream (codec={}, longEdge={})",
+                selected.key, selected.codec, selected.longEdge);
+        return selected;
     }
 
     private static void addSdkCandidate(List<LiveCandidate> candidates, String key, JsonElement value) {
@@ -77,6 +83,7 @@ final class DouyinLiveResolver {
         if (!VideoResolverHttp.isWebUrl(flv)) return;
         int longEdge = 0;
         int bitrate = 0;
+        String codec = "";
         String parameters = string(main, "sdk_params");
         if (!parameters.isBlank()) {
             try {
@@ -86,10 +93,16 @@ final class DouyinLiveResolver {
                     try { longEdge = Math.max(longEdge, Integer.parseInt(part)); } catch (NumberFormatException ignored) { }
                 }
                 bitrate = integer(params, "vbitrate");
+                codec = string(params, "vcodec").toLowerCase(Locale.ROOT);
+                if (codec.isBlank()) codec = string(params, "codec").toLowerCase(Locale.ROOT);
             } catch (RuntimeException ignored) {
             }
         }
-        candidates.add(new LiveCandidate(flv, longEdge, bitrate, key));
+        if (codec.contains("hevc") || codec.contains("h265") || codec.contains("av1") || codec.contains("bytevc")) {
+            return;
+        }
+        candidates.add(new LiveCandidate(flv, longEdge, bitrate, key,
+                codec.contains("avc") || codec.contains("h264"), codec));
     }
 
     private static void addFlatCandidates(List<LiveCandidate> candidates, JsonObject urls) {
@@ -97,7 +110,9 @@ final class DouyinLiveResolver {
         for (var entry : urls.entrySet()) {
             if (!entry.getValue().isJsonPrimitive()) continue;
             String url = entry.getValue().getAsString();
-            if (VideoResolverHttp.isWebUrl(url)) candidates.add(new LiveCandidate(url, qualityHint(entry.getKey()), 0, entry.getKey()));
+            if (VideoResolverHttp.isWebUrl(url)) {
+                candidates.add(new LiveCandidate(url, qualityHint(entry.getKey()), 0, entry.getKey(), false, "unknown"));
+            }
         }
     }
 
@@ -145,7 +160,7 @@ final class DouyinLiveResolver {
         catch (RuntimeException ignored) { return 0; }
     }
 
-    private record LiveCandidate(String url, int longEdge, int bitrate, String key) {
+    private record LiveCandidate(String url, int longEdge, int bitrate, String key, boolean avc, String codec) {
         private long score() {
             return (long) longEdge * 1_000_000L + Math.max(0, bitrate) + (key.contains("origin") ? 1 : 0);
         }

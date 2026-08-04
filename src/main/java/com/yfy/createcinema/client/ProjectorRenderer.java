@@ -81,11 +81,17 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
                 ClientNetworkProjectorStreams.stop(projector);
                 return;
             }
+            ScreenRect screen = findScreenCached(level, projector.getBlockPos(), facing);
+            if (screen == null) {
+                ClientNetworkProjectorAudio.stop(projector);
+                ClientNetworkProjectorStreams.stop(projector);
+                return;
+            }
             ClientNetworkProjectorAudio.mark(projector);
             double playTime = interpolatedPlayTime(projector.getPlayTime(), projector.getSpeed(), partialTick);
             NetworkProjectionFrame frame = ClientNetworkProjectorStreams.frame(projector, playTime);
-            networkStatus = ClientNetworkProjectorStreams.status(projector.getBlockPos());
-            networkProgress = ClientNetworkProjectorStreams.progress(projector.getBlockPos());
+            networkStatus = ClientNetworkProjectorStreams.status(projector);
+            networkProgress = ClientNetworkProjectorStreams.progress(projector);
             texture = frame == null ? null : frame.texture();
             videoWidth = frame == null ? 16 : frame.width();
             videoHeight = frame == null ? 9 : frame.height();
@@ -103,7 +109,9 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
             renderBeam(statusConsumer, matrix, facing, surface);
             renderStatusProgress(statusConsumer, matrix, surface, facing, networkProgress,
                     networkStatus == ClientNetworkProjectorStreams.Status.ERROR);
-            Component message = ClientNetworkProjectorStreams.message(be.getBlockPos());
+            Component message = be instanceof NetworkProjectorBlockEntity projector
+                    ? ClientNetworkProjectorStreams.message(projector)
+                    : ClientNetworkProjectorStreams.message(be.getBlockPos());
             renderStatusImage(buffer, matrix, surface, facing, message,
                     networkStatus == ClientNetworkProjectorStreams.Status.ERROR);
             return;
@@ -137,7 +145,8 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
     }
 
     private ScreenRect findScreenCached(Level level, BlockPos projector, Direction facing) {
-        String key = level.dimension().location() + "/" + projector.asLong();
+        String key = Integer.toUnsignedString(System.identityHashCode(level)) + "/"
+                + level.dimension().location() + "/" + projector.asLong();
         long gameTime = level.getGameTime();
         CachedScreen cached = screenCache.get(key);
         if (cached != null && cached.facing == facing && gameTime < cached.refreshAt) return cached.screen;

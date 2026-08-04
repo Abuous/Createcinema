@@ -18,7 +18,7 @@ public class ClientRuntimeEvents {
         }
         ClientProjectorAudio.tick();
         ClientNetworkProjectorAudio.tick();
-        ClientNetworkProjectorStreams.sweep();
+        ClientNetworkProjectorStreams.tick();
     }
     @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
         clearPlayback();
@@ -26,7 +26,8 @@ public class ClientRuntimeEvents {
     }
     @SubscribeEvent public static void streamingSourceStarted(PlayStreamingSourceEvent event) {
         if (event.getSound() instanceof FilmSoundInstance film) film.onChannelStarted();
-        if (event.getSound() instanceof NetworkProjectorSoundInstance network) network.onChannelStarted();
+        if (event.getSound() instanceof NetworkProjectorSoundInstance network)
+            network.onChannelStarted(event.getEngine(), event.getChannel());
     }
     @SubscribeEvent public static void shuttingDown(GameShuttingDownEvent event) {
         DouyinBrowserBridge.close();
@@ -35,5 +36,6 @@ public class ClientRuntimeEvents {
         ClientProjectorAudio.stopAll();
         ClientNetworkProjectorAudio.stopAll();
         ClientNetworkProjectorStreams.closeAll();
+        net.minecraft.client.Minecraft.getInstance().getSoundManager().stop();
     }
 }

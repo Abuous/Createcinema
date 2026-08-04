@@ -27,7 +27,12 @@ public class NetworkProjectorScreen extends AbstractContainerScreen<NetworkProje
                 .bounds(leftPos + 172, topPos + 70, 72, 20).build());
         setInitialFocus(urlField);
     }
-    private void save() { saveRequested = true; ClientNetworkProjectorStreams.requestRetry(menu.pos); new C2SSetNetworkProjectorUrlPacket(menu.pos, urlField.getValue()).send(); }
+    private void save() {
+        saveRequested = true;
+        String requestedUrl = urlField.getValue().trim();
+        if (requestedUrl.equals(menu.getUrl().trim())) ClientNetworkProjectorStreams.requestRetry(menu.pos);
+        new C2SSetNetworkProjectorUrlPacket(menu.pos, requestedUrl).send();
+    }
     private void cycleQuality() {
         selectedQuality = selectedQuality.next();
         qualityButton.setMessage(qualityLabel());
