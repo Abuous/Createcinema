@@ -107,6 +107,15 @@ public final class ClientProjectorAudio {
         });
     }
 
+    public static void stopFilm(String filmId) {
+        Minecraft minecraft = Minecraft.getInstance();
+        ACTIVE.entrySet().removeIf(entry -> {
+            if (!entry.getValue().projector.getFilmId().equals(filmId)) return false;
+            minecraft.getSoundManager().stop(entry.getValue().sound);
+            return true;
+        });
+    }
+
     public static void stopAll() {
         Minecraft minecraft = Minecraft.getInstance();
         ACTIVE.values().forEach(active -> minecraft.getSoundManager().stop(active.sound));

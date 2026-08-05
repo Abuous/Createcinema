@@ -2,6 +2,7 @@ package com.yfy.createcinema.packet;
 
 import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.film.FilmStorage;
+import com.yfy.createcinema.film.FilmReferenceData;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -32,7 +33,11 @@ public record C2SRequestFilmPacket(String filmId) implements CustomPacketPayload
 
     public void handle(IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
-            if (!(ctx.player() instanceof ServerPlayer player) || filmId.isBlank()) return;
+            if (!(ctx.player() instanceof ServerPlayer player) || !FilmStorage.isValidFilmId(filmId)) return;
+            if (FilmReferenceData.get(player.server).isDeleted(filmId)) {
+                new S2CFilmDeletedPacket(filmId).sendTo(player);
+                return;
+            }
             try {
                 byte[] zip = FilmStorage.readServerZip(player.server, filmId);
                 int total = Math.max(1, (zip.length + CHUNK_SIZE - 1) / CHUNK_SIZE);

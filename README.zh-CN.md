@@ -12,7 +12,7 @@ Create Cinema 是一个面向 Minecraft 1.21.1、NeoForge 和 Create 的电影�
 - Java 21
 - Gradle 8.14.5，或兼容的 Gradle 环境
 
-项目内嵌 JavaCV/FFmpeg 运行依赖，用于本地视频烧录和网络流解码。
+项目内嵌 JavaCV/FFmpeg 运行依赖，用于本地视频烧录和网络流解码。默认 jar 内含 Windows x86_64、Linux x86_64/ARM64、macOS x86_64/ARM64 和 Android ARM64 的原生库。
 
 必需模组、内嵌库和上游许可证说明见 [第三方组件说明](THIRD_PARTY_NOTICES.zh-CN.md)。
 
@@ -42,6 +42,12 @@ Create Cinema 构建在 Minecraft、NeoForge 和 Create 之上，并使用了 Cr
 - 暗室方块：用它封闭的房间会把环境曝光压到最低，让投影保持清晰。
 - 音箱和线缆：把投影仪连接到空间音频音箱。
 - 红石音量：音箱音量由 0 到 15 的红石信号线性控制。
+
+## 胶卷格式
+
+新胶卷使用格式版本 3：`video.mp4` 保存 H.264 视频，`audio.ogg` 独立保存音频，`meta.json` 保存元数据。
+动力放映机会在后台线程解码 v3 视频，优先尝试平台硬件解码器，失败后回退到 FFmpeg 软件解码。
+原有使用 JPEG 帧目录的格式版本 2 胶卷仍可继续播放。
 
 ## 播放速度
 
@@ -84,9 +90,16 @@ Create Cinema 构建在 Minecraft、NeoForge 和 Create 之上，并使用了 Cr
 
 - 爱奇艺页面通常需要网页播放器、登录状态、签名 VRS 请求、VIP 权限或 DRM。模组会在投影画面上显示对应原因，而不是静默失败。
 - 优酷 VIP/DRM 视频不能由 FFmpeg 直接播放。模组会显示需要网页播放器/VIP/DRM 的提示。
-- 抖音推荐流与直播使用仅支持 Windows 的内嵌 Microsoft Edge WebView2 profile。右键配置管理器打开授权；窗口只在登录或完成验证时显示，播放期间保持隐藏。
-- WebView2 profile 保存在本地游戏目录并持久化登录状态。关闭授权或退出 Minecraft 时会关闭内嵌视图；模组不会把原始 Cookie 读取或写入配置文件。
+- 抖音推荐流与直播使用本地浏览器会话：Windows x86_64 使用内嵌 Microsoft Edge WebView2；Linux 使用系统 Chromium/Chrome 原生命令与 DevTools Protocol；Windows ARM 使用 Edge DevTools Protocol；具备 Android WebView 运行时的 Android 环境使用模组内嵌 WebView。
+- 浏览器 profile 只保存在本地游戏目录，关闭授权或退出 Minecraft 时会关闭浏览器会话。Android 使用系统 CookieManager；若无法附加登录覆盖层，可将 `douyin.cookie` 作为仅 Android 使用的 WebView 会话手动回退。
 - DRM/CDM、账号权限与内容权限限制不会被绕过。
+
+## 平台支持
+
+- Linux ARM64：内嵌 JavaCPP/FFmpeg 原生库；抖音授权使用系统 Chromium 系浏览器。自动发现失败时可通过 `CREATE_CINEMA_CHROMIUM` 指定浏览器可执行文件路径。
+- Android ARM64：内嵌 JavaCPP/FFmpeg 原生库，采用标准 `lib/arm64-v8a` 布局。FCL/Pojav 使用 bionic Linux JVM，Create Cinema 会自动选择 Android JavaCPP native；但启动器不会向 mod 暴露 Android WebView，抖音签名请求需使用仅 Android 保留的 `douyin.cookie` 回退。
+- Windows ARM64：抖音授权使用 Edge DevTools Protocol。当前 JavaCV 对应的 Bytedeco 版本不发布 FFmpeg Windows ARM64 原生库，因此视频解码需使用 Windows ARM 的 x86_64 Java 运行时仿真，或提供自编译的 JavaCPP FFmpeg 原生库。
+- Android armv7：Bytedeco 不发布 FFmpeg Android arm 原生库，需要自编译 JavaCPP/FFmpeg 原生库。
 
 ## 方块和物品
 
@@ -109,6 +122,12 @@ Create Cinema 构建在 Minecraft、NeoForge 和 Create 之上，并使用了 Cr
 gradle build
 ```
 
+内嵌 native 集合由 `gradle.properties` 中的 `bundled_platforms` 控制。发布时可裁剪，例如：
+
+```bash
+gradle build -Pbundled_platforms=linux-x86_64,linux-arm64
+```
+
 当前开发环境中，Windows 客户端运行文件使用 Windows Gradle 和 Java 21 生成：
 
 ```bash
@@ -122,7 +141,7 @@ WSLENV=JAVA_HOME/p JAVA_HOME="/mnt/d/jdk21" cmd.exe /d /c 'C:\Users\28271\.gradl
 构建后的模组 jar 位于：
 
 ```text
-build/libs/createcinema-0.1.0-1.21.1.jar
+build/libs/createcinema-0.1.2-1.21.1.jar
 ```
 
 ## 开发说明

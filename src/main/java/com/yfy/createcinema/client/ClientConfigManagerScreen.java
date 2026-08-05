@@ -73,7 +73,9 @@ public class ClientConfigManagerScreen extends Screen {
                         : "gui.createcinema.config_manager.browser_login_prompt");
                 if (test) ClientNetworkProjectorStreams.requestDouyinRetry();
             } else {
-                status = Component.translatable("gui.createcinema.config_manager.browser_failed");
+                status = Component.translatable(PlatformInfo.isAndroid()
+                        ? "gui.createcinema.config_manager.browser_android_cookie"
+                        : "gui.createcinema.config_manager.browser_failed");
             }
         }));
     }

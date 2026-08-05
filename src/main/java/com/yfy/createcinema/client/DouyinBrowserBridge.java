@@ -45,6 +45,7 @@ final class DouyinBrowserBridge {
     private static volatile boolean nativeInitialized;
     private static volatile boolean closing;
     private static volatile boolean detectLoginCompletion;
+    private static volatile DouyinBrowserBackend backend;
 
     private DouyinBrowserBridge() {
     }
@@ -54,14 +55,14 @@ final class DouyinBrowserBridge {
         acquireCaptureLock(generation);
         try {
             ensureWebView(generation);
-            DouyinWebView2Native.showLogin(HOME_URL);
+            backend().showLogin(HOME_URL);
             detectLoginCompletion = true;
             setStatus(generation, Status.WAITING_LOGIN);
-            CreateCinema.LOGGER.info("CreateCinema WebView2: authorization page opened");
+            CreateCinema.LOGGER.info("CreateCinema {}: authorization page opened", backend().name());
         } catch (IOException error) {
             detectLoginCompletion = false;
             setStatus(generation, Status.FAILED);
-            CreateCinema.LOGGER.warn("CreateCinema WebView2: failed to open authorization page: {}",
+            CreateCinema.LOGGER.warn("CreateCinema browser: failed to open authorization page: {}",
                     error.getMessage());
             throw new IOException("Could not open the embedded Douyin authorization page", error);
         } finally {
@@ -90,20 +91,19 @@ final class DouyinBrowserBridge {
     }
 
     static Status status() {
-        if (detectLoginCompletion && currentStatus == Status.WAITING_LOGIN
-                && DouyinWebView2Native.isAuthorized()) {
+        if (detectLoginCompletion && currentStatus == Status.WAITING_LOGIN && isAuthorized()) {
             detectLoginCompletion = false;
             currentStatus = Status.READY;
-            DouyinWebView2Native.hide();
+            hide();
             ClientNetworkProjectorStreams.requestDouyinRetry();
-            CreateCinema.LOGGER.info("CreateCinema WebView2: authorization completed");
+            CreateCinema.LOGGER.info("CreateCinema browser: authorization completed");
         }
         return currentStatus;
     }
 
     static boolean isAvailable() {
         try {
-            return DouyinWebView2Native.isRuntimeAvailable(gameDirectory());
+            return backend().isRuntimeAvailable(gameDirectory());
         } catch (IOException error) {
             return false;
         }
@@ -116,9 +116,9 @@ final class DouyinBrowserBridge {
         if (!nativeInitialized) return;
         nativeInitialized = false;
         try {
-            DouyinWebView2Native.shutdown();
+            shutdownBackend();
         } catch (RuntimeException | LinkageError error) {
-            CreateCinema.LOGGER.debug("CreateCinema WebView2: capture cancellation failed", error);
+            CreateCinema.LOGGER.debug("CreateCinema browser: capture cancellation failed", error);
         }
     }
 
@@ -129,13 +129,74 @@ final class DouyinBrowserBridge {
         nativeInitialized = false;
         detectLoginCompletion = false;
         try {
-            DouyinWebView2Native.shutdown();
-            CreateCinema.LOGGER.info("CreateCinema WebView2: closed");
+            shutdownBackend();
+            CreateCinema.LOGGER.info("CreateCinema browser: closed");
         } catch (RuntimeException | LinkageError error) {
-            CreateCinema.LOGGER.debug("CreateCinema WebView2: close failed", error);
+            CreateCinema.LOGGER.debug("CreateCinema browser: close failed", error);
         } finally {
             closing = false;
         }
+    }
+
+    private static DouyinBrowserBackend backend() throws IOException {
+        DouyinBrowserBackend current = backend;
+        if (current != null) return current;
+        synchronized (DouyinBrowserBridge.class) {
+            current = backend;
+            if (current != null) return current;
+            current = createBackend();
+            if (current == null) {
+                throw new IOException("Douyin browser authorization is not supported on " + PlatformInfo.displayName());
+            }
+            backend = current;
+            return current;
+        }
+    }
+
+    private static DouyinBrowserBackend createBackend() {
+        switch (PlatformInfo.os()) {
+            case WINDOWS:
+                if (PlatformInfo.isX86_64()) return new WebView2BrowserBackend();
+                if (PlatformInfo.isArm64()) {
+                    List<Path> edge = ChromiumCdpBrowserBackend.windowsArmCandidates();
+                    return new ChromiumCdpBrowserBackend(edge, false);
+                }
+                return null;
+            case LINUX:
+            case MACOS:
+                return new ChromiumCdpBrowserBackend(ChromiumCdpBrowserBackend.linuxCandidates(), !hasDisplay());
+            case ANDROID:
+                return new AndroidWebViewBrowserBackend();
+            default:
+                return null;
+        }
+    }
+
+    private static boolean hasDisplay() {
+        String display = System.getenv("DISPLAY");
+        String wayland = System.getenv("WAYLAND_DISPLAY");
+        return display != null && !display.isBlank() || wayland != null && !wayland.isBlank();
+    }
+
+    private static boolean isAuthorized() {
+        try {
+            return backend().isAuthorized();
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    private static void hide() {
+        try {
+            backend().hide();
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void shutdownBackend() {
+        DouyinBrowserBackend current = backend;
+        backend = null;
+        if (current != null) current.shutdown();
     }
 
     private static JsonObject capture(String navigationUrl, String expectedHost,
@@ -146,13 +207,13 @@ final class DouyinBrowserBridge {
         try {
             if (freshWebView && nativeInitialized) {
                 nativeInitialized = false;
-                DouyinWebView2Native.shutdown();
+                shutdownBackend();
             }
             ensureWebView(generation);
-            CreateCinema.LOGGER.debug("CreateCinema WebView2: capture starting, host={}", expectedHost);
+            CreateCinema.LOGGER.debug("CreateCinema browser: capture starting, host={}", expectedHost);
             byte[] body;
             try {
-                body = DouyinWebView2Native.capture(navigationUrl, expectedHost, expectedPaths,
+                body = backend().capture(navigationUrl, expectedHost, expectedPaths,
                         expectedQueryName, expectedQueryValue, CAPTURE_TIMEOUT);
             } catch (IOException error) {
                 if (error.getMessage() != null && error.getMessage().startsWith("CAPTURE_UNAVAILABLE:")) {
@@ -163,10 +224,10 @@ final class DouyinBrowserBridge {
             JsonObject captured = parseBody(body);
             if (hasRejectedStatus(captured)) throw new CaptureUnavailableException("Douyin rejected the response");
             requireOperationAllowed(generation);
-            DouyinWebView2Native.hide();
+            backend().hide();
             detectLoginCompletion = false;
             setStatus(generation, Status.READY);
-            CreateCinema.LOGGER.info("CreateCinema WebView2: capture ok, host={}", expectedHost);
+            CreateCinema.LOGGER.info("CreateCinema browser: capture ok, host={}", expectedHost);
             return captured;
         } catch (CaptureUnavailableException error) {
             if (generation != GENERATION.get()) {
@@ -175,12 +236,12 @@ final class DouyinBrowserBridge {
             if (error.getMessage() != null && error.getMessage().contains("before timeout")) {
                 detectLoginCompletion = false;
                 setStatus(generation, Status.READY);
-                CreateCinema.LOGGER.warn("CreateCinema WebView2: live capture timed out; it will be retried");
+                CreateCinema.LOGGER.warn("CreateCinema browser: live capture timed out; it will be retried");
                 throw new IOException("Douyin browser live capture timed out", error);
             }
             detectLoginCompletion = false;
             setStatus(generation, Status.WAITING_LOGIN);
-            CreateCinema.LOGGER.warn("CreateCinema WebView2: capture unavailable: {}", error.getMessage());
+            CreateCinema.LOGGER.warn("CreateCinema browser: capture unavailable: {}", error.getMessage());
             throw new IOException(
                     "Douyin browser feed or recommendations unavailable; the page requires verification", error);
         } catch (IOException error) {
@@ -189,8 +250,8 @@ final class DouyinBrowserBridge {
             }
             detectLoginCompletion = false;
             setStatus(generation, Status.FAILED);
-            CreateCinema.LOGGER.error("CreateCinema WebView2: capture failed: {}", error.getMessage());
-            throw new IOException("The embedded Douyin WebView2 connection failed", error);
+            CreateCinema.LOGGER.error("CreateCinema browser: capture failed: {}", error.getMessage());
+            throw new IOException("The embedded Douyin browser connection failed", error);
         } finally {
             CAPTURE_LOCK.unlock();
         }
@@ -200,13 +261,14 @@ final class DouyinBrowserBridge {
         requireOperationAllowed(generation);
         if (nativeInitialized) return;
         setStatus(generation, Status.STARTING);
+        DouyinBrowserBackend active = backend();
         Path gameDirectory = gameDirectory();
         Path profile = gameDirectory.resolve("createcinema").resolve("browser")
-                .resolve("webview2").resolve("profile");
-        DouyinWebView2Native.initialize(gameDirectory, profile);
+                .resolve(active.profileDirName()).resolve("profile");
+        active.initialize(gameDirectory, profile);
         requireOperationAllowed(generation);
         nativeInitialized = true;
-        CreateCinema.LOGGER.info("CreateCinema WebView2: initialized");
+        CreateCinema.LOGGER.info("CreateCinema {}: initialized", active.name());
     }
 
     private static JsonObject parseBody(byte[] body) throws IOException {
@@ -239,9 +301,9 @@ final class DouyinBrowserBridge {
             acquired = CAPTURE_LOCK.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting for Douyin WebView2");
+            throw new IOException("Interrupted while waiting for Douyin browser authorization");
         }
-        if (!acquired) throw new IOException("The embedded Douyin WebView2 is busy");
+        if (!acquired) throw new IOException("The embedded Douyin browser is busy");
         try {
             requireOperationAllowed(generation);
         } catch (IOException error) {

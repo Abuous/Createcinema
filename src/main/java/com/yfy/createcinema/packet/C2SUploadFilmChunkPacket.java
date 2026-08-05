@@ -78,7 +78,7 @@ public record C2SUploadFilmChunkPacket(UUID uploadId, BlockPos burnerPos, int in
                 byte[] zip = session.join();
                 FilmMetadata metadata = FilmStorage.saveUploadedFilm(player.server, zip);
                 if (burner.hasBlankFilm()) {
-                    burner.writeFilmId(metadata.id(), metadata.title());
+                    burner.writeFilmId(metadata.id(), metadata.title(), metadata.durationSeconds());
                     new S2CBurnStatusPacket(burnerPos, "Burn complete: " + metadata.title(), 1.0f, false).sendTo(player);
                 } else {
                     new S2CBurnStatusPacket(burnerPos, "Burner has no blank film", 0.0f, false).sendTo(player);

@@ -4,6 +4,7 @@ import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.film.FilmStorage;
 import com.yfy.createcinema.packet.S2CBurnStatusPacket;
 import com.yfy.createcinema.packet.S2CDownloadFilmChunkPacket;
+import com.yfy.createcinema.packet.S2CFilmDeletedPacket;
 import net.minecraft.core.BlockPos;
 
 import java.io.ByteArrayOutputStream;
@@ -63,6 +64,12 @@ public class ClientPacketHandlers {
             ClientFilmCache.invalidate(packet.filmId());
             CreateCinema.LOGGER.warn("Failed to cache downloaded film {}", packet.filmId(), e);
         }
+    }
+
+    public static void handleFilmDeleted(S2CFilmDeletedPacket packet) {
+        DOWNLOADS.remove(packet.filmId());
+        ClientFilmCache.delete(packet.filmId());
+        ClientProjectorAudio.stopFilm(packet.filmId());
     }
 
     private static class DownloadSession {

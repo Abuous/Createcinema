@@ -3,6 +3,7 @@ package com.yfy.createcinema.blockentity;
 import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.gui.BurnerMenu;
 import com.yfy.createcinema.item.FilmItem;
+import com.yfy.createcinema.film.FilmLifecycle;
 import com.yfy.createcinema.packet.S2CBurnStatusPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -47,9 +48,13 @@ public class BurnerBlockEntity extends BlockEntity implements Container {
         }
     }
 
-    public void writeFilmId(String filmId, String title) {
+    public void writeFilmId(String filmId, String title, double durationSeconds) {
         if (film.getItem() instanceof FilmItem) {
             film = FilmItem.create(ModRegistry.FILM.get(), filmId, title);
+            FilmItem.setDurationSeconds(film, durationSeconds);
+            if (level != null && !level.isClientSide && level.getServer() != null) {
+                FilmLifecycle.registerCopy(level.getServer(), film);
+            }
             burning = false;
             setChanged();
             if (level != null && !level.isClientSide) {

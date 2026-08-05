@@ -22,5 +22,6 @@ public class ModPackets {
 
         registrar.playToClient(S2CBurnStatusPacket.TYPE, S2CBurnStatusPacket.STREAM_CODEC, S2CBurnStatusPacket::handle);
         registrar.playToClient(S2CDownloadFilmChunkPacket.TYPE, S2CDownloadFilmChunkPacket.STREAM_CODEC, S2CDownloadFilmChunkPacket::handle);
+        registrar.playToClient(S2CFilmDeletedPacket.TYPE, S2CFilmDeletedPacket.STREAM_CODEC, S2CFilmDeletedPacket::handle);
     }
 }

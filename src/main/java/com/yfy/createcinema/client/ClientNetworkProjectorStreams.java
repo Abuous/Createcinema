@@ -520,7 +520,8 @@ public final class ClientNetworkProjectorStreams {
                             || details.contains("douyin browser authorization")
                             || details.contains("douyin recommendation authorization")
                             || details.contains("douyin authenticated")
-                            || details.contains("requires verification");
+                            || details.contains("requires verification")
+                            || ClientVideoBurner.ffmpegLoadFailed();
                     retryAt = configurationFailure ? Long.MAX_VALUE : System.currentTimeMillis() + 5_000L;
                     if (configurationFailure) {
                         CreateCinema.LOGGER.warn("Network projector requires updated Douyin client authorization for {}", url);

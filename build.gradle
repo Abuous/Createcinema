@@ -14,6 +14,14 @@ sourceSets.main.resources {
     exclude("src/generated/**/.cache")
 }
 
+sourceSets {
+    androidBridge {
+        java {
+            srcDir('src/androidBridge/java')
+        }
+    }
+}
+
 repositories {
     mavenCentral()
     maven { url = "https://maven.createmod.net" }
@@ -75,9 +83,14 @@ configurations {
 
 def currentOs = System.getProperty("os.name").toLowerCase(Locale.ROOT)
 def currentArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT)
-def bytedecoPlatform = currentOs.contains("win") ? "windows-x86_64" :
-        currentOs.contains("mac") ? (currentArch.contains("aarch64") || currentArch.contains("arm64") ? "macosx-arm64" : "macosx-x86_64") :
-        (currentArch.contains("aarch64") || currentArch.contains("arm64") ? "linux-arm64" : "linux-x86_64")
+def arm64 = currentArch.contains("aarch64") || currentArch.contains("arm64")
+def bytedecoPlatform = currentOs.contains("win") ? (arm64 ? "windows-arm64" : "windows-x86_64") :
+        currentOs.contains("mac") ? (arm64 ? "macosx-arm64" : "macosx-x86_64") :
+        (arm64 ? "linux-arm64" : "linux-x86_64")
+
+def bundledPlatforms = (project.findProperty('bundled_platforms') ?:
+        'windows-x86_64,linux-x86_64,linux-arm64,macosx-x86_64,macosx-arm64,android-arm64')
+        .toString().split(',').collect { it.trim() }.findAll { !it.isEmpty() }
 
 def strippedJavaCv = tasks.register("strippedJavaCv", Jar) {
     archiveFileName = "javacv-${javacv_version}-stripped.jar"
@@ -107,27 +120,43 @@ dependencies {
     additionalRuntimeClasspath(files(strippedJavaCv))
     additionalRuntimeClasspath("org.bytedeco:javacpp:${javacv_version}")
     additionalRuntimeClasspath("org.bytedeco:ffmpeg:${ffmpeg_version}")
-    additionalRuntimeClasspath("org.bytedeco:javacpp:${javacv_version}:${bytedecoPlatform}")
-    additionalRuntimeClasspath("org.bytedeco:ffmpeg:${ffmpeg_version}:${bytedecoPlatform}")
+    if (bundledPlatforms.contains(bytedecoPlatform)) {
+        additionalRuntimeClasspath("org.bytedeco:javacpp:${javacv_version}:${bytedecoPlatform}")
+        additionalRuntimeClasspath("org.bytedeco:ffmpeg:${ffmpeg_version}:${bytedecoPlatform}")
+    }
 
     bytedecoBundle("org.bytedeco:javacpp:${javacv_version}")
     bytedecoBundle("org.bytedeco:ffmpeg:${ffmpeg_version}")
 
-    ["linux-x86_64", "windows-x86_64", "macosx-x86_64", "macosx-arm64"].each { platform ->
-        bytedecoBundle("org.bytedeco:javacpp:${javacv_version}:${platform}")
-        bytedecoBundle("org.bytedeco:ffmpeg:${ffmpeg_version}:${platform}")
-    }
+    androidBridgeImplementation('com.google.android:android:4.1.1.4')
+}
+
+// Gradle collapses multiple Maven classifiers for the same module in one configuration. Keep each
+// target ABI in its own detached configuration so the fat jar always receives every requested native.
+def platformNativeBundles = bundledPlatforms.collect { platform ->
+    def javacppNative = dependencies.create("org.bytedeco:javacpp:${javacv_version}:${platform}")
+    def ffmpegNative = dependencies.create("org.bytedeco:ffmpeg:${ffmpeg_version}:${platform}")
+    javacppNative.transitive = false
+    ffmpegNative.transitive = false
+    configurations.detachedConfiguration(javacppNative, ffmpegNative)
 }
 
 tasks.named('jar', Jar).configure {
     dependsOn strippedJavaCv
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    inputs.property("bundledPlatforms", bundledPlatforms)
+    inputs.files(platformNativeBundles)
+    from sourceSets.androidBridge.output
     from({ zipTree(strippedJavaCv.get().archiveFile.get().asFile) }) {
         exclude "module-info.class"
         exclude "META-INF/versions/*/module-info.class"
         exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
     }
-    from({ configurations.bytedecoBundle.collect { zipTree(it) } }) {
+    from({
+        def artifacts = new ArrayList(configurations.bytedecoBundle.files)
+        platformNativeBundles.each { bundle -> artifacts.addAll(bundle.files) }
+        artifacts.collect { zipTree(it) }
+    }) {
         exclude "module-info.class"
         exclude "META-INF/versions/*/module-info.class"
         exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"

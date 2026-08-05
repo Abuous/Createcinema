@@ -2,13 +2,17 @@ package com.yfy.createcinema.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.math.Axis;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
+import com.yfy.createcinema.ClientConfig;
 import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.PlaybackSpeeds;
 import com.yfy.createcinema.block.ProjectorBlock;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
 import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
 import com.yfy.createcinema.film.FilmMetadata;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.RenderType;
@@ -19,6 +23,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -27,6 +32,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.base.KineticBlockEntity> implements BlockEntityRenderer<T> {
@@ -62,19 +68,33 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
         int videoHeight;
         ClientNetworkProjectorStreams.Status networkStatus = null;
         float networkProgress = 0.0f;
+        boolean filmDeleted = false;
         if (be instanceof ProjectorBlockEntity projector) {
             if (!projector.canProject()) {
                 ClientProjectorAudio.stop(projector);
+                ClientFilmVideoStreams.stop(projector);
                 return;
             }
             ClientProjectorAudio.mark(projector);
-            FilmMetadata metadata = ClientFilmCache.metadata(projector.getFilmId());
-            if (metadata == null || metadata.frameCount() <= 0 || metadata.fps() <= 0) return;
-            double playTime = interpolatedPlayTime(projector.getPlayTime(), projector.getSpeed(), partialTick);
-            int frame = (int) Math.floor(playTime * metadata.fps()) % metadata.frameCount();
-            texture = ClientFilmCache.frameTexture(projector.getFilmId(), frame);
-            videoWidth = metadata.width();
-            videoHeight = metadata.height();
+            if (ClientFilmCache.isDeleted(projector.getFilmId())) {
+                ClientProjectorAudio.stop(projector);
+                texture = null;
+                videoWidth = 16;
+                videoHeight = 9;
+                filmDeleted = true;
+            } else {
+                FilmMetadata metadata = ClientFilmCache.metadata(projector.getFilmId());
+                if (metadata == null || metadata.frameCount() <= 0 || metadata.fps() <= 0) return;
+                double playTime = interpolatedPlayTime(projector.getPlayTime(), projector.getSpeed(), partialTick);
+                if (metadata.formatVersion() >= 3) {
+                    texture = ClientFilmVideoStreams.frame(projector, metadata, playTime);
+                } else {
+                    int frame = (int) Math.floor(playTime * metadata.fps()) % metadata.frameCount();
+                    texture = ClientFilmCache.frameTexture(projector.getFilmId(), frame);
+                }
+                videoWidth = metadata.width();
+                videoHeight = metadata.height();
+            }
         } else if (be instanceof NetworkProjectorBlockEntity projector) {
             if (!projector.canProject()) {
                 ClientNetworkProjectorAudio.stop(projector);
@@ -103,6 +123,15 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
         if (screen == null) return;
 
         ProjectionSurface surface = createProjectionSurface(be.getBlockPos(), facing, screen, videoWidth, videoHeight);
+        if (filmDeleted) {
+            Matrix4f matrix = poseStack.last().pose();
+            VertexConsumer statusConsumer = buffer.getBuffer(RenderType.lightning());
+            renderBeam(statusConsumer, matrix, facing, surface);
+            renderStatusProgress(statusConsumer, matrix, surface, facing, 0.0f, true);
+            renderStatusImage(poseStack, buffer, surface, facing,
+                    Component.translatable("message.createcinema.film_deleted"), true);
+            return;
+        }
         if (networkStatus != null && networkStatus != ClientNetworkProjectorStreams.Status.PLAYING) {
             Matrix4f matrix = poseStack.last().pose();
             VertexConsumer statusConsumer = buffer.getBuffer(RenderType.lightning());
@@ -112,7 +141,7 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
             Component message = be instanceof NetworkProjectorBlockEntity projector
                     ? ClientNetworkProjectorStreams.message(projector)
                     : ClientNetworkProjectorStreams.message(be.getBlockPos());
-            renderStatusImage(buffer, matrix, surface, facing, message,
+            renderStatusImage(poseStack, buffer, surface, facing, message,
                     networkStatus == ClientNetworkProjectorStreams.Status.ERROR);
             return;
         }
@@ -155,12 +184,58 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
         return screen;
     }
 
-    private static void renderStatusImage(MultiBufferSource buffer, Matrix4f matrix, ProjectionSurface surface,
+    private static void renderStatusImage(PoseStack poseStack, MultiBufferSource buffer, ProjectionSurface surface,
                                           Direction facing, Component message, boolean error) {
-        ResourceLocation texture = ClientStatusMessageTextures.texture(message, error);
-        VertexConsumer consumer = buffer.getBuffer(RenderType.entityTranslucent(texture));
-        ProjectionSurface image = surface.offset(facing, -0.018).region(0.13, 0.87, 0.48, 0.66);
-        renderVideo(consumer, matrix, image, facing, LightTexture.FULL_BRIGHT, 255);
+        if (!PlatformInfo.isAndroid()) {
+            Matrix4f matrix = poseStack.last().pose();
+            ResourceLocation texture = ClientStatusMessageTextures.texture(message, error);
+            VertexConsumer consumer = buffer.getBuffer(RenderType.entityTranslucent(texture));
+            ProjectionSurface image = surface.offset(facing, -0.018).region(0.13, 0.87, 0.48, 0.66);
+            renderVideo(consumer, matrix, image, facing, LightTexture.FULL_BRIGHT, 255);
+            return;
+        }
+        ProjectionSurface panel = surface.offset(facing, -0.018).region(0.13, 0.87, 0.48, 0.66);
+        Matrix4f matrix = poseStack.last().pose();
+        VertexConsumer consumer = buffer.getBuffer(RenderType.lightning());
+        int accentRed = error ? 255 : 66;
+        int accentGreen = error ? 76 : 205;
+        int accentBlue = error ? 76 : 255;
+        renderColoredQuad(consumer, matrix, panel, 10, 14, 20, 220);
+        renderColoredQuad(consumer, matrix, panel.region(0.04, 0.07, 0.12, 0.88),
+                accentRed, accentGreen, accentBlue, 235);
+        renderColoredQuad(consumer, matrix, panel.region(0.10, 0.96, 0.12, 0.88),
+                accentRed, accentGreen, accentBlue, 32);
+        renderStatusText(poseStack, buffer, panel, message);
+    }
+
+    private static void renderStatusText(PoseStack poseStack, MultiBufferSource buffer,
+                                         ProjectionSurface panel, Component message) {
+        Font font = Minecraft.getInstance().font;
+        List<FormattedCharSequence> lines = font.split(message, 220);
+        if (lines.isEmpty()) return;
+        if (lines.size() > 3) lines = lines.subList(0, 3);
+        int textWidth = lines.stream().mapToInt(font::width).max().orElse(1);
+        int textHeight = lines.size() * font.lineHeight;
+        float scale = (float) Math.min(panel.width() * 0.60 / textWidth, panel.height() * 0.48 / textHeight);
+        if (scale <= 0.0f) return;
+
+        Vec3 horizontal = panel.bottomRight.subtract(panel.bottomLeft).normalize();
+        float rotation = (float) Math.atan2(-horizontal.z, horizontal.x);
+        float localWidth = (float) (panel.width() / scale);
+        float localHeight = (float) (panel.height() / scale);
+        float y = (localHeight - textHeight) / 2.0f;
+        poseStack.pushPose();
+        poseStack.translate(panel.topLeft.x, panel.topLeft.y, panel.topLeft.z);
+        poseStack.mulPose(Axis.YP.rotation(rotation));
+        poseStack.scale(scale, -scale, scale);
+        Matrix4f textMatrix = poseStack.last().pose();
+        for (FormattedCharSequence line : lines) {
+            float x = (localWidth - font.width(line)) / 2.0f;
+            font.drawInBatch(line, x, y, 0xFFFFFFFF, false, textMatrix, buffer,
+                    Font.DisplayMode.POLYGON_OFFSET, 0, LightTexture.FULL_BRIGHT);
+            y += font.lineHeight;
+        }
+        poseStack.popPose();
     }
 
     private static void renderStatusProgress(VertexConsumer consumer, Matrix4f matrix, ProjectionSurface surface,
@@ -187,12 +262,13 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
 
     private static ScreenRect findScreen(Level level, BlockPos projector, Direction facing) {
         Direction horizontal = facing.getClockWise();
-        for (int distance = 1; distance <= 16; distance++) {
+        int anchorRadius = ClientConfig.screenAnchorRadius();
+        for (int distance = 1; distance <= ClientConfig.screenMaxDistance(); distance++) {
             BlockPos center = projector.relative(facing, distance);
             BlockPos anchor = null;
             int bestScore = Integer.MAX_VALUE;
-            for (int vertical = -4; vertical <= 4; vertical++) {
-                for (int side = -4; side <= 4; side++) {
+            for (int vertical = -anchorRadius; vertical <= anchorRadius; vertical++) {
+                for (int side = -anchorRadius; side <= anchorRadius; side++) {
                     BlockPos candidate = center.relative(horizontal, side).above(vertical);
                     int score = Math.abs(side) + Math.abs(vertical);
                     if (score < bestScore && isScreen(level, candidate)) {
@@ -207,15 +283,21 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
     }
 
     private static ScreenRect expandScreen(Level level, BlockPos anchor, Direction horizontal) {
+        int maxWidth = ClientConfig.screenMaxWidth();
+        int maxHeight = ClientConfig.screenMaxHeight();
+        int minHorizontalLimit = -((maxWidth - 1) / 2);
+        int maxHorizontalLimit = maxWidth - 1 + minHorizontalLimit;
+        int minVerticalLimit = -((maxHeight - 1) / 2);
+        int maxVerticalLimit = maxHeight - 1 + minVerticalLimit;
         int minHorizontal = 0;
         int maxHorizontal = 0;
-        while (minHorizontal > -8 && isScreen(level, anchor.relative(horizontal, minHorizontal - 1))) minHorizontal--;
-        while (maxHorizontal < 8 && isScreen(level, anchor.relative(horizontal, maxHorizontal + 1))) maxHorizontal++;
+        while (minHorizontal > minHorizontalLimit && isScreen(level, anchor.relative(horizontal, minHorizontal - 1))) minHorizontal--;
+        while (maxHorizontal < maxHorizontalLimit && isScreen(level, anchor.relative(horizontal, maxHorizontal + 1))) maxHorizontal++;
 
         int minVertical = 0;
         int maxVertical = 0;
-        while (minVertical > -8 && isCompleteRow(level, anchor, horizontal, minHorizontal, maxHorizontal, minVertical - 1)) minVertical--;
-        while (maxVertical < 8 && isCompleteRow(level, anchor, horizontal, minHorizontal, maxHorizontal, maxVertical + 1)) maxVertical++;
+        while (minVertical > minVerticalLimit && isCompleteRow(level, anchor, horizontal, minHorizontal, maxHorizontal, minVertical - 1)) minVertical--;
+        while (maxVertical < maxVerticalLimit && isCompleteRow(level, anchor, horizontal, minHorizontal, maxHorizontal, maxVertical + 1)) maxVertical++;
         return new ScreenRect(anchor, horizontal, minHorizontal, maxHorizontal, minVertical, maxVertical);
     }
 

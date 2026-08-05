@@ -12,7 +12,8 @@ Create Cinema is a Minecraft 1.21.1 NeoForge addon for Create. It adds kinetic p
 - Java 21
 - Gradle 8.14.5 or a compatible Gradle installation
 
-The project embeds JavaCV/FFmpeg runtime dependencies for local video burning and network stream decoding.
+The project embeds JavaCV/FFmpeg runtime dependencies for local video burning and network stream decoding. The
+default jar includes native libraries for Windows x86_64, Linux x86_64/ARM64, macOS x86_64/ARM64, and Android ARM64.
 
 See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for the required mods, embedded libraries, and upstream license notes.
 
@@ -42,6 +43,12 @@ These dependencies are not relicensed by Create Cinema. Their names, code, asset
 - Darkroom Block: sealed rooms built with this block keep projection clarity at the darkest level.
 - Speaker and Cable: connect projectors to spatial audio speakers.
 - Redstone volume: speaker volume is controlled linearly by redstone strength from 0 to 15.
+
+## Film Format
+
+New films use format version 3: H.264 video in `video.mp4`, independent `audio.ogg`, and `meta.json`.
+The Kinetic Projector decodes v3 video on background workers and tries the platform hardware decoder before
+falling back to FFmpeg software decoding. Existing format version 2 films with JPEG frame directories remain playable.
 
 ## Playback Speed
 
@@ -84,9 +91,16 @@ Known platform limits:
 
 - iQiyi pages commonly require the browser player, login state, signed VRS requests, VIP access, or DRM. The mod shows this reason on the screen instead of failing silently.
 - Youku VIP/DRM videos are not directly playable by FFmpeg. The mod shows a web-player/VIP/DRM message on the screen.
-- Douyin recommendations and Live use a Windows-only embedded Microsoft Edge WebView2 profile. Right-click a Configuration Manager and open authorization; the window is shown only while signing in or completing verification and stays hidden during playback.
-- The WebView2 profile remains under the local game directory and preserves the signed-in session. The embedded view is closed when authorization is disabled or Minecraft exits; the mod does not read or store raw Cookies in its configuration.
+- Douyin recommendations and Live use a local browser session: embedded Microsoft Edge WebView2 on Windows x86_64, Chromium/Chrome through the native browser command and DevTools Protocol on Linux, Edge through DevTools Protocol on Windows ARM, and an embedded Android WebView where the Android runtime exposes WebView.
+- Browser profiles remain local to the game directory and are closed when authorization is disabled or Minecraft exits. Android uses the platform CookieManager; if its login overlay is unavailable, `douyin.cookie` is an Android-only manual fallback for the WebView session.
 - DRM/CDM and account/content restrictions are not bypassed.
+
+## Platform Support
+
+- Linux ARM64: bundled JavaCPP/FFmpeg natives; Douyin authorization uses a system Chromium-family browser. Set `CREATE_CINEMA_CHROMIUM` to an executable path when browser discovery is insufficient.
+- Android ARM64: bundled JavaCPP/FFmpeg natives are packaged under the standard `lib/arm64-v8a` layout. FCL/Pojav use a bionic Linux JVM, so Create Cinema selects the Android JavaCPP natives automatically. Those launchers do not expose Android WebView to mods; use the Android-only `douyin.cookie` fallback for signed Douyin requests.
+- Windows ARM64: Douyin authorization uses system Edge through DevTools Protocol. Bytedeco does not publish an FFmpeg Windows ARM64 native for the current JavaCV line, so video decoding requires an x86_64 Java runtime under Windows ARM emulation or a custom JavaCPP FFmpeg build.
+- Android armv7: Bytedeco does not publish an FFmpeg Android arm native. A custom JavaCPP/FFmpeg native build is required.
 
 ## Blocks and Items
 
@@ -111,6 +125,12 @@ From this project directory:
 gradle build
 ```
 
+The embedded native set is controlled by `bundled_platforms` in `gradle.properties`. A release can be trimmed, for example:
+
+```bash
+gradle build -Pbundled_platforms=linux-x86_64,linux-arm64
+```
+
 In the current development environment, Windows client run files are prepared with the Windows Gradle install and Java 21:
 
 ```bash
@@ -124,7 +144,7 @@ Do not run a clean task on the D drive immediately before launching from the IDE
 The built mod jar is written to:
 
 ```text
-build/libs/createcinema-0.1.0-1.21.1.jar
+build/libs/createcinema-0.1.2-1.21.1.jar
 ```
 
 ## Development Notes

@@ -20,6 +20,7 @@ public class ClientRuntimeEvents {
             activeLevel = level;
         }
         ClientProjectorAudio.tick();
+        ClientFilmVideoStreams.tick();
         ClientNetworkProjectorAudio.tick();
         ClientNetworkProjectorStreams.tick();
     }
@@ -43,6 +44,7 @@ public class ClientRuntimeEvents {
     }
     private static void clearPlayback() {
         ClientProjectorAudio.stopAll();
+        ClientFilmVideoStreams.closeAll();
         ClientNetworkProjectorAudio.stopAll();
         ClientNetworkProjectorStreams.closeAll();
         net.minecraft.client.Minecraft.getInstance().getSoundManager().stop();

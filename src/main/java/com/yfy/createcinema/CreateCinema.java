@@ -2,6 +2,10 @@ package com.yfy.createcinema;
 
 import com.simibubi.create.api.stress.BlockStressValues;
 import com.yfy.createcinema.client.CreateCinemaPonderPlugin;
+import com.yfy.createcinema.client.PlatformInfo;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
+import net.neoforged.neoforge.items.wrapper.SidedInvWrapper;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -18,6 +22,12 @@ public class CreateCinema {
     public static final Logger LOGGER = LoggerFactory.getLogger(CreateCinema.class);
 
     public CreateCinema(IEventBus modEventBus, ModContainer modContainer) {
+        PlatformInfo.ensureJavacppPlatform();
+        if (PlatformInfo.isAndroid()) {
+            LOGGER.info("CreateCinema Android compatibility patch active; JavaCPP platform {}, pathsFirst={}",
+                    System.getProperty("org.bytedeco.javacpp.platform"),
+                    System.getProperty("org.bytedeco.javacpp.pathsFirst"));
+        }
         ModRegistry.BLOCKS.register(modEventBus);
         ModRegistry.ITEMS.register(modEventBus);
         ModRegistry.BLOCK_ENTITIES.register(modEventBus);
@@ -27,6 +37,7 @@ public class CreateCinema {
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
 
         modEventBus.addListener(this::commonSetup);
+        modEventBus.addListener(this::registerCapabilities);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             CreateCinemaPonderPlugin.register();
@@ -38,5 +49,10 @@ public class CreateCinema {
             BlockStressValues.IMPACTS.register(ModRegistry.PROJECTOR.get(), () -> 4.0);
             BlockStressValues.IMPACTS.register(ModRegistry.NETWORK_PROJECTOR.get(), () -> 4.0);
         });
+    }
+
+    private void registerCapabilities(RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(Capabilities.ItemHandler.BLOCK, ModRegistry.PROJECTOR_BE.get(),
+                (projector, side) -> new SidedInvWrapper(projector, side));
     }
 }

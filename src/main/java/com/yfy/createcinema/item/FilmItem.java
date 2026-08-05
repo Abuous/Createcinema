@@ -11,10 +11,14 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
 
 import java.util.List;
+import java.util.UUID;
 
 public class FilmItem extends Item {
     public static final String TAG_FILM_ID = "FilmId";
     public static final String TAG_TITLE = "Title";
+    public static final String TAG_COPY_ID = "CopyId";
+    public static final String TAG_COMPLETED = "Completed";
+    public static final String TAG_DURATION_SECONDS = "DurationSeconds";
 
     public FilmItem(Properties properties) {
         super(properties);
@@ -25,6 +29,8 @@ public class FilmItem extends Item {
         CompoundTag tag = new CompoundTag();
         tag.putString(TAG_FILM_ID, filmId);
         tag.putString(TAG_TITLE, title);
+        tag.putBoolean(TAG_COMPLETED, false);
+        if (!filmId.isBlank()) tag.putString(TAG_COPY_ID, newCopyId());
         stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
         if (!title.isBlank()) {
             stack.set(DataComponents.ITEM_NAME, Component.literal(title));
@@ -38,6 +44,51 @@ public class FilmItem extends Item {
         return data.copyTag().getString(TAG_FILM_ID);
     }
 
+    public static String getCopyId(ItemStack stack) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        return data == null ? "" : data.copyTag().getString(TAG_COPY_ID);
+    }
+
+    public static void setCopyId(ItemStack stack, String copyId) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        CompoundTag tag = data == null ? new CompoundTag() : data.copyTag();
+        tag.putString(TAG_COPY_ID, copyId);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+    }
+
+    public static boolean isCompleted(ItemStack stack) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        return data != null && data.copyTag().getBoolean(TAG_COMPLETED);
+    }
+
+    public static void setCompleted(ItemStack stack, boolean completed) {
+        updateData(stack, tag -> tag.putBoolean(TAG_COMPLETED, completed));
+    }
+
+    public static double getDurationSeconds(ItemStack stack) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        return data == null ? 0.0 : Math.max(0.0, data.copyTag().getDouble(TAG_DURATION_SECONDS));
+    }
+
+    public static void setDurationSeconds(ItemStack stack, double durationSeconds) {
+        updateData(stack, tag -> tag.putDouble(TAG_DURATION_SECONDS, Math.max(0.0, durationSeconds)));
+    }
+
+    public static void prepareForPlayback(ItemStack stack) {
+        setCompleted(stack, false);
+    }
+
+    private static void updateData(ItemStack stack, java.util.function.Consumer<CompoundTag> mutation) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        CompoundTag tag = data == null ? new CompoundTag() : data.copyTag();
+        mutation.accept(tag);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+    }
+
+    public static String newCopyId() {
+        return UUID.randomUUID().toString();
+    }
+
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
         String filmId = getFilmId(stack);
@@ -45,6 +96,9 @@ public class FilmItem extends Item {
             tooltip.add(Component.translatable("item.createcinema.film.empty").withStyle(ChatFormatting.GRAY));
         } else {
             tooltip.add(Component.literal(filmId).withStyle(ChatFormatting.DARK_GRAY));
+            tooltip.add(Component.translatable(isCompleted(stack)
+                    ? "tooltip.createcinema.film.completed" : "tooltip.createcinema.film.uncompleted")
+                    .withStyle(isCompleted(stack) ? ChatFormatting.GREEN : ChatFormatting.GRAY));
         }
         if (!Screen.hasShiftDown()) {
             tooltip.add(Component.translatable("tooltip.createcinema.hold_shift").withStyle(ChatFormatting.DARK_GRAY));
