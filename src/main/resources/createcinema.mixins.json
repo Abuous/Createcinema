@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.yfy.createcinema.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "AllItemAttributeTypesMixin",
+    "ItemEntityMixin",
+    "ServerGamePacketListenerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
