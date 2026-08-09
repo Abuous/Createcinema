@@ -62,6 +62,8 @@ public final class ClientNetworkProjectorStreams {
     private static final double HARD_RESYNC_SECONDS = 3.0;
     private static final double DISPLAY_LEAD_SECONDS = 0.035;
     private static final long LIVE_STOP_GRACE_MILLIS = 1_000L;
+    private static final long DECODE_RESUBMIT_MILLIS = 2_000L;
+    private static final long DECODE_STALL_MILLIS = 30_000L;
     private static final String NETWORK_RW_TIMEOUT_MICROS = "5000000";
     private static final Map<String, Session> SESSIONS = new HashMap<>();
     private static final AtomicInteger NEXT_MEDIA_REVISION = new AtomicInteger();
@@ -270,6 +272,9 @@ public final class ClientNetworkProjectorStreams {
                 entry.getValue().close("live projector stop grace expired");
                 return true;
             }
+            if (entry.getValue().stalled(now)) {
+                return true;
+            }
             if (entry.getValue().lastTouched >= cutoff) return false;
             entry.getValue().close("not rendered for 60 seconds");
             return true;
@@ -323,6 +328,8 @@ public final class ClientNetworkProjectorStreams {
         private volatile boolean failed;
         private volatile boolean ended;
         private volatile long retryAt;
+        private volatile boolean decodeResubmitPending;
+        private volatile long lastDecodeHeartbeat = System.currentTimeMillis();
         private volatile float progress = 0.03f;
         private volatile Component errorMessage;
         private volatile boolean bufferReady;
@@ -391,7 +398,13 @@ public final class ClientNetworkProjectorStreams {
         }
 
         private synchronized void startDecodeIfReady() {
-            if (closed || failed || initialDecodeSubmitted || !canStartDecode()) return;
+            if (closed || failed || !canStartDecode()) return;
+            if (decodeResubmitPending && System.currentTimeMillis() >= retryAt) {
+                decodeResubmitPending = false;
+                submitDecode();
+                return;
+            }
+            if (initialDecodeSubmitted) return;
             initialDecodeSubmitted = true;
             submitDecode();
         }
@@ -623,6 +636,7 @@ public final class ClientNetworkProjectorStreams {
                             }
                             double maxBufferSeconds = source.live() ? MAX_LIVE_BUFFER_SECONDS : MAX_BUFFER_SECONDS;
                             if (drift <= maxBufferSeconds) break;
+                            lastDecodeHeartbeat = System.currentTimeMillis();
                             Thread.sleep(4L);
                         }
                         if (mediaDelta(timestamp, wrap(playbackTime(), duration), duration) < -0.12) continue;
@@ -699,6 +713,7 @@ public final class ClientNetworkProjectorStreams {
 
         private void awaitPlaybackEnd() throws InterruptedException {
             while (!closed && duration > 0.0 && playbackTime() < duration - DISPLAY_LEAD_SECONDS) {
+                lastDecodeHeartbeat = System.currentTimeMillis();
                 Thread.sleep(4L);
             }
         }
@@ -742,13 +757,23 @@ public final class ClientNetworkProjectorStreams {
             if (!closed) submitDecode();
         }
 
+        private boolean stalled(long now) {
+            if (closed || failed || ended || lastDecodeHeartbeat >= now - DECODE_STALL_MILLIS) return false;
+            close("decode stalled");
+            CreateCinema.LOGGER.warn("Network stream session {} stalled for {} ms, dropping it", url,
+                    now - lastDecodeHeartbeat);
+            return true;
+        }
+
         private void submitDecode() {
             try {
                 STREAM_EXECUTOR.execute(this::decode);
+                decodeResubmitPending = false;
             } catch (RejectedExecutionException error) {
-                failed = true;
-                errorMessage = Component.translatable("gui.createcinema.stream.error.queue_full");
-                retryAt = System.currentTimeMillis() + 5_000L;
+                decodeResubmitPending = true;
+                retryAt = System.currentTimeMillis() + DECODE_RESUBMIT_MILLIS;
+                CreateCinema.LOGGER.debug("Network stream decode queue is full, will retry {} in {} ms", url,
+                        DECODE_RESUBMIT_MILLIS);
             }
         }
 
