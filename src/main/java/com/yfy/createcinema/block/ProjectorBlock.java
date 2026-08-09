@@ -7,6 +7,7 @@ import com.simibubi.create.content.kinetics.base.KineticBlock;
 import com.simibubi.create.foundation.block.IBE;
 import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
+import com.yfy.createcinema.client.ClientCableIndex;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
@@ -19,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Mirror;
@@ -71,6 +73,14 @@ public class ProjectorBlock extends KineticBlock implements IBE<ProjectorBlockEn
             serverPlayer.openMenu(projector.getMenuProvider(), pos);
         }
         return InteractionResult.SUCCESS;
+    }
+
+    @Override
+    protected BlockState updateShape(BlockState state, Direction direction, BlockState neighborState,
+                                     LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
+        // A newly placed cable updates this projector, not the cable itself.
+        ClientCableIndex.onBlockChanged(level, neighborPos);
+        return state;
     }
 
     @Override

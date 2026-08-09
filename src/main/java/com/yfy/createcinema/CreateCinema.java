@@ -1,8 +1,11 @@
 package com.yfy.createcinema;
 
 import com.simibubi.create.api.stress.BlockStressValues;
+import com.simibubi.create.foundation.data.CreateRegistrate;
 import com.yfy.createcinema.client.CreateCinemaPonderPlugin;
+import com.yfy.createcinema.datagen.ModItemModelProvider;
 import com.yfy.createcinema.client.PlatformInfo;
+import com.yfy.createcinema.display.CinemaDisplaySources;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.items.wrapper.SidedInvWrapper;
@@ -20,6 +23,7 @@ import org.slf4j.LoggerFactory;
 public class CreateCinema {
     public static final String MODID = "createcinema";
     public static final Logger LOGGER = LoggerFactory.getLogger(CreateCinema.class);
+    public static final CreateRegistrate REGISTRATE = CreateRegistrate.create(MODID);
 
     public CreateCinema(IEventBus modEventBus, ModContainer modContainer) {
         PlatformInfo.ensureJavacppPlatform();
@@ -34,10 +38,13 @@ public class CreateCinema {
         ModRegistry.MENU_TYPES.register(modEventBus);
         ModRegistry.DATA_COMPONENTS.register(modEventBus);
         ModRegistry.CREATIVE_TABS.register(modEventBus);
+        REGISTRATE.registerEventListeners(modEventBus);
+        CinemaDisplaySources.register();
         modContainer.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
 
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::registerCapabilities);
+        modEventBus.addListener(ModItemModelProvider::gatherData);
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             CreateCinemaPonderPlugin.register();

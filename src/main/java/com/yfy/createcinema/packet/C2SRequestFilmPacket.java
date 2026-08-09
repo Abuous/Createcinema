@@ -13,6 +13,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public record C2SRequestFilmPacket(String filmId) implements CustomPacketPayload {
     private static final int CHUNK_SIZE = 900_000;
@@ -39,13 +42,16 @@ public record C2SRequestFilmPacket(String filmId) implements CustomPacketPayload
                 return;
             }
             try {
-                byte[] zip = FilmStorage.readServerZip(player.server, filmId);
-                int total = Math.max(1, (zip.length + CHUNK_SIZE - 1) / CHUNK_SIZE);
-                for (int i = 0; i < total; i++) {
-                    int from = i * CHUNK_SIZE;
-                    int to = Math.min(zip.length, from + CHUNK_SIZE);
-                    byte[] chunk = java.util.Arrays.copyOfRange(zip, from, to);
-                    new S2CDownloadFilmChunkPacket(filmId, i, total, chunk).sendTo(player);
+                Path zip = FilmStorage.serverZipPath(player.server, filmId);
+                long size = Files.size(zip);
+                long chunks = Math.max(1L, (size + CHUNK_SIZE - 1L) / CHUNK_SIZE);
+                if (chunks > Integer.MAX_VALUE) throw new IOException("Film package is too large for the transfer protocol");
+                try (InputStream input = Files.newInputStream(zip)) {
+                    for (int i = 0; i < (int) chunks; i++) {
+                        byte[] chunk = input.readNBytes(CHUNK_SIZE);
+                        if (chunk.length == 0) throw new IOException("Film package ended before all chunks were sent");
+                        new S2CDownloadFilmChunkPacket(filmId, i, (int) chunks, chunk).sendTo(player);
+                    }
                 }
             } catch (IOException e) {
                 CreateCinema.LOGGER.warn("Failed to send film {}", filmId, e);

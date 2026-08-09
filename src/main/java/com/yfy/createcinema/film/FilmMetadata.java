@@ -4,8 +4,17 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 public record FilmMetadata(int formatVersion, String id, String title, int fps, int width, int height,
-                           int frameCount, String hash, String quality, boolean hasAudio) {
+                           int frameCount, String hash, String quality, boolean hasAudio, String mediaType) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+
+    public FilmMetadata(int formatVersion, String id, String title, int fps, int width, int height,
+                        int frameCount, String hash, String quality, boolean hasAudio) {
+        this(formatVersion, id, title, fps, width, height, frameCount, hash, quality, hasAudio, MediaType.VIDEO.id());
+    }
+
+    public MediaType mediaTypeValue() {
+        return MediaType.fromId(mediaType);
+    }
 
     public double durationSeconds() {
         return fps <= 0 ? 0.0 : frameCount / (double) fps;

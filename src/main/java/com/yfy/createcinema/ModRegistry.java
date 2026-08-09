@@ -17,8 +17,10 @@ import com.yfy.createcinema.gui.RemoteControlUpgradeMenu;
 import com.yfy.createcinema.item.FilmItem;
 import com.yfy.createcinema.item.ContinuousPlayUpgradeItem;
 import com.yfy.createcinema.item.ConfigManagerItem;
+import com.yfy.createcinema.item.DisplayUpgradeItem;
 import com.yfy.createcinema.item.RemoteControlUpgradeItem;
 import com.yfy.createcinema.item.TooltipBlockItem;
+import com.yfy.createcinema.film.MediaType;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
@@ -55,12 +57,20 @@ public class ModRegistry {
                     .networkSynchronized(ItemContainerContents.STREAM_CODEC));
 
     public static final DeferredItem<FilmItem> FILM = ITEMS.register("film", () -> new FilmItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<FilmItem> BLANK_IMAGE = ITEMS.register("blank_image",
+            () -> new FilmItem(new Item.Properties().stacksTo(1), MediaType.IMAGE));
+    public static final DeferredItem<FilmItem> BLANK_ALBUM = ITEMS.register("blank_album",
+            () -> new FilmItem(new Item.Properties().stacksTo(1), MediaType.ALBUM));
+    public static final DeferredItem<FilmItem> BLANK_SLIDES = ITEMS.register("blank_slides",
+            () -> new FilmItem(new Item.Properties().stacksTo(1), MediaType.SLIDES));
     public static final DeferredItem<ContinuousPlayUpgradeItem> CONTINUOUS_PLAY_UPGRADE = ITEMS.register("continuous_play_upgrade",
             () -> new ContinuousPlayUpgradeItem(new Item.Properties().stacksTo(1)));
     public static final DeferredItem<RemoteControlUpgradeItem> REMOTE_CONTROL_UPGRADE = ITEMS.register("remote_control_upgrade",
             () -> new RemoteControlUpgradeItem(new Item.Properties().stacksTo(1)));
     public static final DeferredItem<ConfigManagerItem> CONFIG_MANAGER = ITEMS.register("config_manager",
             () -> new ConfigManagerItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<DisplayUpgradeItem> DISPLAY_UPGRADE = ITEMS.register("display_upgrade",
+            () -> new DisplayUpgradeItem(new Item.Properties().stacksTo(1)));
 
     public static final DeferredBlock<BurnerBlock> BURNER = BLOCKS.register("burner",
             () -> new BurnerBlock(BlockBehaviour.Properties.of().strength(3.5f).requiresCorrectToolForDrops()));
@@ -71,7 +81,7 @@ public class ModRegistry {
     public static final DeferredBlock<ProjectorBlock> PROJECTOR = BLOCKS.register("projector",
             () -> new ProjectorBlock(BlockBehaviour.Properties.of().strength(3.5f).requiresCorrectToolForDrops().noOcclusion()));
     public static final DeferredBlock<SpeakerBlock> SPEAKER = BLOCKS.register("speaker",
-            () -> new SpeakerBlock(BlockBehaviour.Properties.of().strength(2.0f).requiresCorrectToolForDrops()));
+            () -> new SpeakerBlock(BlockBehaviour.Properties.of().strength(2.0f).requiresCorrectToolForDrops().noOcclusion()));
     public static final DeferredBlock<CableBlock> CABLE = BLOCKS.register("cable",
             () -> new CableBlock(BlockBehaviour.Properties.of().strength(0.6f).noOcclusion()));
     public static final DeferredBlock<NetworkProjectorBlock> NETWORK_PROJECTOR = BLOCKS.register("network_projector",
@@ -123,9 +133,13 @@ public class ModRegistry {
                         output.accept(NETWORK_PROJECTOR_ITEM.get());
                         output.accept(DARKROOM_BLOCK_ITEM.get());
                         output.accept(FILM.get());
+                        output.accept(BLANK_IMAGE.get());
+                        output.accept(BLANK_ALBUM.get());
+                        output.accept(BLANK_SLIDES.get());
                         output.accept(CONTINUOUS_PLAY_UPGRADE.get());
                         output.accept(REMOTE_CONTROL_UPGRADE.get());
                         output.accept(CONFIG_MANAGER.get());
+                        output.accept(DISPLAY_UPGRADE.get());
                     })
                     .build());
 }

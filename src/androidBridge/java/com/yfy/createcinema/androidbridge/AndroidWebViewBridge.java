@@ -13,6 +13,9 @@ import android.webkit.WebViewClient;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -34,6 +37,8 @@ import java.util.concurrent.TimeUnit;
 public final class AndroidWebViewBridge {
     private static volatile WebView webView;
     private static volatile String configCookies = "";
+    private static volatile File profileCookieFile;
+    private static volatile String profileCookieUrl = "https://www.douyin.com/";
 
     private static final Object CAPTURE_LOCK = new Object();
     private static volatile boolean capturePending;
@@ -43,6 +48,7 @@ public final class AndroidWebViewBridge {
     private static volatile String[] capturePaths;
     private static volatile String captureQueryName;
     private static volatile String captureQueryValue;
+    private static volatile String captureReferer;
 
     private AndroidWebViewBridge() {
     }
@@ -53,7 +59,20 @@ public final class AndroidWebViewBridge {
 
     public static void initialize(String profilePath) throws IOException {
         final Context context = context();
+        File profile = new File(profilePath);
+        if (!profile.isDirectory() && !profile.mkdirs() && !profile.isDirectory()) {
+            throw new IOException("Could not create Android WebView profile directory");
+        }
+        profileCookieFile = new File(profile, "cookies.txt");
+        String normalized = profilePath.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+        profileCookieUrl = normalized.contains("/youku/") ? "https://www.youku.com/"
+                : normalized.contains("/iqiyi/") ? "https://www.iqiyi.com/"
+                : "https://www.douyin.com/";
+        final String restoredCookies = readProfileCookies(profileCookieFile);
         onMain(() -> {
+            CookieManager manager = CookieManager.getInstance();
+            manager.removeAllCookie();
+            restoreCookies(manager, profileCookieUrl, restoredCookies);
             WebView view = new WebView(context);
             view.setWebViewClient(new WebViewClient() {
                 @Override
@@ -70,7 +89,7 @@ public final class AndroidWebViewBridge {
         configCookies = cookies == null ? "" : cookies;
         if (cookies == null || cookies.isEmpty()) return;
         try {
-            onMain(() -> CookieManager.getInstance().setCookie("https://www.douyin.com", cookies));
+            onMain(() -> restoreCookies(CookieManager.getInstance(), "https://www.douyin.com", cookies));
         } catch (IOException ignored) {
         }
     }
@@ -91,6 +110,7 @@ public final class AndroidWebViewBridge {
             capturePaths = paths;
             captureQueryName = queryName;
             captureQueryValue = queryValue;
+            captureReferer = navigationUrl;
             capturedBody = null;
             capturePending = true;
         }
@@ -130,12 +150,26 @@ public final class AndroidWebViewBridge {
     }
 
     public static boolean isAuthorized() {
+        return isAuthorized("https://www.douyin.com/", new String[]{"sessionid", "sessionid_ss", "sid_tt"});
+    }
+
+    public static boolean isAuthorized(String url, String[] cookieNames) {
         try {
-            String cookies = cookiesFor("https://www.douyin.com/");
-            return cookies != null && (cookies.contains("sessionid=")
-                    || cookies.contains("sessionid_ss=") || cookies.contains("sid_tt="));
+            String cookies = cookiesFor(url).toLowerCase(java.util.Locale.ROOT);
+            for (String name : cookieNames) {
+                if (name != null && cookies.contains(name.toLowerCase(java.util.Locale.ROOT) + "=")) return true;
+            }
+            return false;
         } catch (Throwable error) {
             return false;
+        }
+    }
+
+    public static String cookieHeader(String url) {
+        try {
+            return cookiesFor(url);
+        } catch (Throwable error) {
+            return "";
         }
     }
 
@@ -145,11 +179,40 @@ public final class AndroidWebViewBridge {
         if (view != null) {
             try {
                 onMain(() -> {
+                    writeProfileCookies(profileCookieFile, CookieManager.getInstance().getCookie(profileCookieUrl));
                     view.stopLoading();
                     view.destroy();
                 });
             } catch (IOException ignored) {
             }
+        }
+    }
+
+    private static String readProfileCookies(File file) {
+        if (file == null || !file.isFile() || file.length() <= 0 || file.length() > 1024 * 1024) return "";
+        try (FileInputStream input = new FileInputStream(file);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) > 0) output.write(buffer, 0, read);
+            return new String(output.toByteArray(), "UTF-8");
+        } catch (Throwable error) {
+            return "";
+        }
+    }
+
+    private static void writeProfileCookies(File file, String cookies) {
+        if (file == null) return;
+        try (FileOutputStream output = new FileOutputStream(file, false)) {
+            if (cookies != null && !cookies.isEmpty()) output.write(cookies.getBytes("UTF-8"));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void restoreCookies(CookieManager manager, String url, String cookies) {
+        if (cookies == null || cookies.isEmpty()) return;
+        for (String cookie : cookies.split(";\\s*")) {
+            if (!cookie.isEmpty() && cookie.indexOf('=') > 0) manager.setCookie(url, cookie);
         }
     }
 
@@ -183,7 +246,9 @@ public final class AndroidWebViewBridge {
             connection.setRequestMethod("GET");
             connection.setRequestProperty("User-Agent",
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
-            connection.setRequestProperty("Referer", "https://www.douyin.com/");
+            if (captureReferer != null && !captureReferer.isEmpty()) {
+                connection.setRequestProperty("Referer", captureReferer);
+            }
             if (cookies != null && !cookies.isEmpty()) connection.setRequestProperty("Cookie", cookies);
             connection.setConnectTimeout(10_000);
             connection.setReadTimeout(10_000);
@@ -230,10 +295,9 @@ public final class AndroidWebViewBridge {
         for (String pair : query.split("&")) {
             int equals = pair.indexOf('=');
             if (equals < 0) continue;
-            if (pair.substring(0, equals).equals(queryName)
-                    && pair.substring(equals + 1).equals(queryValue)) {
-                return true;
-            }
+            if (!pair.substring(0, equals).equals(queryName)) continue;
+            String candidate = pair.substring(equals + 1);
+            if (candidate.equals(queryValue)) return true;
         }
         return false;
     }
@@ -242,7 +306,7 @@ public final class AndroidWebViewBridge {
         String manager = CookieManager.getInstance().getCookie(url);
         StringBuilder builder = new StringBuilder();
         if (manager != null && !manager.isEmpty()) builder.append(manager);
-        if (configCookies != null && !configCookies.isEmpty()) {
+        if (url != null && url.contains("douyin.com") && configCookies != null && !configCookies.isEmpty()) {
             if (builder.length() > 0) builder.append("; ");
             builder.append(configCookies);
         }

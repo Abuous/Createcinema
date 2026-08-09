@@ -4,6 +4,7 @@ import com.yfy.createcinema.NetworkVideoQuality;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class BilibiliResolver {
@@ -24,7 +25,7 @@ public final class BilibiliResolver {
         CachedMedia cached = CACHE.get(cacheKey);
         if (cached != null && System.currentTimeMillis() < cached.expiresAt) {
             if (HlsStreamCache.isHls(cached.media.videoUrl())) {
-                HlsStreamCache.prepareAsync(cached.media.videoUrl(), cached.media.referer());
+                HlsStreamCache.prepareAsync(cached.media.videoUrl(), cached.media.referer(), cached.media.headers());
             }
             return cached.media;
         }
@@ -34,11 +35,15 @@ public final class BilibiliResolver {
     }
 
     public static ResolvedPlaylist discoverPlaylist(String input) throws IOException, InterruptedException {
-        if (BilibiliLiveResolver.canResolve(input) || DouyinLiveResolver.canResolve(input))
+        if (BilibiliLiveResolver.canResolve(input) || DouyinLiveResolver.canResolve(input)
+                || CctvLiveResolver.canResolve(input))
             return ResolvedPlaylist.single(input);
         if (BilibiliVideoResolver.canResolve(input)) return BilibiliVideoResolver.discoverPlaylist(input);
         if (TencentVideoResolver.canResolve(input)) return TencentVideoResolver.discoverPlaylist(input);
         if (DouyinVideoResolver.canResolve(input)) return DouyinVideoResolver.discoverPlaylist(input);
+        if (YoukuVideoResolver.canResolve(input)) return YoukuVideoResolver.discoverPlaylist(input);
+        if (IqiyiVideoResolver.canResolve(input)) return IqiyiVideoResolver.discoverPlaylist(input);
+        if (CctvVideoResolver.canResolve(input)) return CctvVideoResolver.discoverPlaylist(input);
         return ResolvedPlaylist.single(input);
     }
 
@@ -46,25 +51,38 @@ public final class BilibiliResolver {
             throws IOException, InterruptedException {
         if (BilibiliLiveResolver.canResolve(input)) return BilibiliLiveResolver.resolve(input, quality);
         if (DouyinLiveResolver.canResolve(input)) return DouyinLiveResolver.resolve(input, quality);
+        if (CctvLiveResolver.canResolve(input)) return CctvLiveResolver.resolve(input, quality);
         if (BilibiliVideoResolver.canResolve(input)) return BilibiliVideoResolver.resolve(input, quality);
         if (TencentVideoResolver.canResolve(input)) return TencentVideoResolver.resolve(input, quality);
         if (DouyinVideoResolver.canResolve(input)) return DouyinVideoResolver.resolve(input, quality);
-        try {
-            return GenericVideoResolver.resolve(input);
-        } catch (IOException error) {
-            if (IqiyiVideoResolver.canResolve(input)) throw IqiyiVideoResolver.unsupported(error);
-            if (YoukuVideoResolver.canResolve(input)) throw YoukuVideoResolver.unsupported(error);
-            throw error;
-        }
+        if (YoukuVideoResolver.canResolve(input)) return YoukuVideoResolver.resolve(input, quality);
+        if (IqiyiVideoResolver.canResolve(input)) return IqiyiVideoResolver.resolve(input, quality);
+        if (CctvVideoResolver.canResolve(input)) return CctvVideoResolver.resolve(input, quality);
+        return GenericVideoResolver.resolve(input);
     }
 
     private static boolean isLive(String input) {
-        return BilibiliLiveResolver.canResolve(input) || DouyinLiveResolver.canResolve(input);
+        return BilibiliLiveResolver.canResolve(input) || DouyinLiveResolver.canResolve(input)
+                || CctvLiveResolver.canResolve(input);
     }
 
-    public record ResolvedMedia(String videoUrl, String audioUrl, String referer, double durationSeconds, boolean live) {
+    public record ResolvedMedia(String videoUrl, String audioUrl, String referer, double durationSeconds, boolean live,
+                                Map<String, String> headers, String snapshotUrl) {
+        public ResolvedMedia {
+            headers = headers == null ? Map.of() : Map.copyOf(headers);
+        }
+
+        public ResolvedMedia(String videoUrl, String audioUrl, String referer, double durationSeconds, boolean live,
+                             Map<String, String> headers) {
+            this(videoUrl, audioUrl, referer, durationSeconds, live, headers, null);
+        }
+
+        public ResolvedMedia(String videoUrl, String audioUrl, String referer, double durationSeconds, boolean live) {
+            this(videoUrl, audioUrl, referer, durationSeconds, live, Map.of());
+        }
+
         public ResolvedMedia(String videoUrl, String audioUrl, String referer, double durationSeconds) {
-            this(videoUrl, audioUrl, referer, durationSeconds, false);
+            this(videoUrl, audioUrl, referer, durationSeconds, false, Map.of());
         }
     }
 

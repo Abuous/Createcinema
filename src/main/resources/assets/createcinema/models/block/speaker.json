@@ -1,12 +1,10 @@
 {
-  "parent": "minecraft:block/cube",
+  "loader": "createcinema:bedrock",
+  "render_type": "minecraft:cutout",
+  "source": "createcinema:bedrock/block/speaker.json",
+  "bones": ["root"],
   "textures": {
-    "down": "minecraft:block/black_concrete",
-    "up": "minecraft:block/black_concrete",
-    "north": "minecraft:block/note_block",
-    "south": "minecraft:block/note_block",
-    "west": "minecraft:block/black_concrete",
-    "east": "minecraft:block/black_concrete",
-    "particle": "minecraft:block/black_concrete"
+    "texture": "createcinema:block/speaker",
+    "particle": "createcinema:block/speaker"
   }
 }

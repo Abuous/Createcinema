@@ -24,6 +24,18 @@ final class DouyinAuthenticatedApi {
         return items(DouyinBrowserBridge.captureRecommendations(awemeId));
     }
 
+    static JsonObject detail(String awemeId) throws IOException {
+        JsonObject response = DouyinBrowserBridge.captureDetail(awemeId);
+        JsonObject detail = object(response, "aweme_detail");
+        if (detail != null) return detail;
+        JsonObject data = object(response, "data");
+        detail = object(data, "aweme_detail");
+        if (detail != null) return detail;
+        List<JsonObject> candidates = items(response);
+        if (!candidates.isEmpty()) return candidates.getFirst();
+        throw new IOException("Douyin browser detail response has no playable video");
+    }
+
     static List<JsonObject> feed() throws IOException {
         List<JsonObject> items = items(DouyinBrowserBridge.captureFeed());
         if (items.isEmpty()) throw new IOException("Douyin browser feed returned no playable entries");

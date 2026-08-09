@@ -17,10 +17,12 @@ import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 public class ClientEventHandler {
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
+        CinemaPartialModels.init();
         event.enqueueWork(() -> {
             com.yfy.createcinema.ClientConfig.clearLegacyDouyinCookie();
-            com.yfy.createcinema.ClientConfig.setDouyinBrowserShutdown(
-                    () -> java.util.concurrent.CompletableFuture.runAsync(DouyinBrowserBridge::close));
+            com.yfy.createcinema.ClientConfig.setBrowserShutdown(provider ->
+                    java.util.concurrent.CompletableFuture.runAsync(() ->
+                            DouyinBrowserBridge.disable(BrowserProvider.byId(provider))));
             ClientVideoBurner.preloadFfmpeg();
         });
     }
@@ -35,7 +37,7 @@ public class ClientEventHandler {
 
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
-        event.registerBlockEntityRenderer(ModRegistry.PROJECTOR_BE.get(), ProjectorRenderer::new);
-        event.registerBlockEntityRenderer(ModRegistry.NETWORK_PROJECTOR_BE.get(), ProjectorRenderer::new);
+        event.registerBlockEntityRenderer(ModRegistry.PROJECTOR_BE.get(), PartialProjectorRenderer::new);
+        event.registerBlockEntityRenderer(ModRegistry.NETWORK_PROJECTOR_BE.get(), NetworkProjectorRenderer::new);
     }
 }

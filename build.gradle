@@ -20,6 +20,11 @@ sourceSets {
             srcDir('src/androidBridge/java')
         }
     }
+    poiBridge {
+        java {
+            srcDir('src/poiBridge/java')
+        }
+    }
 }
 
 repositories {
@@ -28,6 +33,7 @@ repositories {
     maven { url = "https://maven.ithundxr.dev/snapshots" }
     maven { url = "https://maven.blamejared.com" }
     maven { url = "https://api.modrinth.com/maven" }
+    maven { url = "https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/" }
 }
 
 base {
@@ -110,9 +116,19 @@ dependencies {
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
     runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
     implementation("com.tterrag.registrate:Registrate:${registrate_version}")
+    compileOnly("mezz.jei:jei-1.21.1-neoforge-api:${jei_version}")
+    if (project.hasProperty("withJei")) {
+        runtimeOnly("mezz.jei:jei-1.21.1-neoforge:${jei_version}")
+    }
     implementation("org.jsoup:jsoup:1.18.3")
     additionalRuntimeClasspath("org.jsoup:jsoup:1.18.3")
     jarJar("org.jsoup:jsoup:1.18.3")
+    poiBridgeImplementation("org.apache.poi:poi-ooxml:5.2.5") {
+        exclude group: "org.apache.logging.log4j"
+    }
+    poiBridgeImplementation("org.apache.poi:poi-scratchpad:5.2.5") {
+        exclude group: "org.apache.logging.log4j"
+    }
 
     javacvRaw("org.bytedeco:javacv:${javacv_version}") { transitive = false }
     implementation(files(strippedJavaCv))
@@ -131,6 +147,18 @@ dependencies {
     androidBridgeImplementation('com.google.android:android:4.1.1.4')
 }
 
+def poiRuntimeBundle = tasks.register("poiRuntimeBundle", Jar) {
+    archiveFileName = "poi-runtime.jar"
+    destinationDirectory = layout.buildDirectory.dir("private-libs")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.poiBridge.output
+    from({ configurations.poiBridgeRuntimeClasspath.collect { zipTree(it) } })
+    exclude "module-info.class"
+    exclude "META-INF/versions/*/module-info.class"
+    exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+    exclude "org/apache/logging/log4j/**"
+}
+
 // Gradle collapses multiple Maven classifiers for the same module in one configuration. Keep each
 // target ABI in its own detached configuration so the fat jar always receives every requested native.
 def platformNativeBundles = bundledPlatforms.collect { platform ->
@@ -142,7 +170,7 @@ def platformNativeBundles = bundledPlatforms.collect { platform ->
 }
 
 tasks.named('jar', Jar).configure {
-    dependsOn strippedJavaCv
+    dependsOn strippedJavaCv, poiRuntimeBundle
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     inputs.property("bundledPlatforms", bundledPlatforms)
     inputs.files(platformNativeBundles)
@@ -160,6 +188,9 @@ tasks.named('jar', Jar).configure {
         exclude "module-info.class"
         exclude "META-INF/versions/*/module-info.class"
         exclude "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+    }
+    from(poiRuntimeBundle.flatMap { it.archiveFile }) {
+        into "META-INF/createcinema"
     }
 }
 

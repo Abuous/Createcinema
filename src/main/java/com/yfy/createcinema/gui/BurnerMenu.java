@@ -3,6 +3,7 @@ package com.yfy.createcinema.gui;
 import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.blockentity.BurnerBlockEntity;
 import com.yfy.createcinema.item.FilmItem;
+import com.yfy.createcinema.film.MediaType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -63,6 +64,10 @@ public class BurnerMenu extends AbstractContainerMenu {
 
     public boolean hasBlankFilm() {
         return burner != null && burner.hasBlankFilm();
+    }
+
+    public MediaType getBlankMediaType() {
+        return burner == null ? MediaType.VIDEO : burner.getBlankMediaType();
     }
 
     @Override

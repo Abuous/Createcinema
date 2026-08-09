@@ -4,15 +4,23 @@ import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.film.FilmStorage;
 import com.yfy.createcinema.packet.S2CBurnStatusPacket;
 import com.yfy.createcinema.packet.S2CDownloadFilmChunkPacket;
+import com.yfy.createcinema.packet.S2CFilmAvailablePacket;
 import com.yfy.createcinema.packet.S2CFilmDeletedPacket;
 import net.minecraft.core.BlockPos;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientPacketHandlers {
+    private static final int CHUNK_SIZE = 900_000;
     private static final Map<BlockPos, BurnProgress> BURN_STATUS = new ConcurrentHashMap<>();
     private static final Map<String, DownloadSession> DOWNLOADS = new ConcurrentHashMap<>();
 
@@ -30,9 +38,7 @@ public class ClientPacketHandlers {
 
     public static void handleBurnStatus(S2CBurnStatusPacket packet) {
         setBurnProgress(packet.burnerPos(), packet.message(), packet.progress(), packet.active());
-        if (!packet.active()) {
-            ClientVideoBurner.finish(packet.burnerPos());
-        }
+        if (!packet.active()) ClientVideoBurner.finish(packet.burnerPos());
     }
 
     private static float clamp(float progress) {
@@ -46,50 +52,106 @@ public class ClientPacketHandlers {
     }
 
     public static void handleFilmChunk(S2CDownloadFilmChunkPacket packet) {
-        DownloadSession session = DOWNLOADS.computeIfAbsent(packet.filmId(), id -> new DownloadSession(packet.total()));
-        if (session.total != packet.total()) {
-            DOWNLOADS.remove(packet.filmId());
+        if (!validChunk(packet)) {
+            discardDownload(packet.filmId());
             return;
         }
-        session.chunks[packet.index()] = packet.data();
-        if (!session.complete()) return;
-
-        DOWNLOADS.remove(packet.filmId());
         try {
-            byte[] zip = session.join();
-            FilmStorage.extractZip(zip, ClientFilmCache.filmDirectory(packet.filmId()));
-            ClientFilmCache.invalidate(packet.filmId());
-            CreateCinema.LOGGER.info("Cached downloaded film {}", packet.filmId());
+            DownloadSession session = DOWNLOADS.get(packet.filmId());
+            if (session == null) {
+                session = new DownloadSession(packet.filmId(), packet.total());
+                DOWNLOADS.put(packet.filmId(), session);
+            }
+            if (session.total != packet.total()) {
+                discardDownload(packet.filmId());
+                return;
+            }
+            session.write(packet.index(), packet.data());
+            if (!session.complete()) return;
+
+            try {
+                DOWNLOADS.remove(packet.filmId());
+                Path packageFile = session.finish();
+                FilmStorage.extractZip(packageFile, ClientFilmCache.filmDirectory(packet.filmId()));
+                ClientFilmCache.invalidate(packet.filmId());
+                CreateCinema.LOGGER.info("Cached downloaded film {}", packet.filmId());
+            } finally {
+                session.delete();
+            }
         } catch (IOException e) {
+            discardDownload(packet.filmId());
             ClientFilmCache.invalidate(packet.filmId());
             CreateCinema.LOGGER.warn("Failed to cache downloaded film {}", packet.filmId(), e);
         }
     }
 
     public static void handleFilmDeleted(S2CFilmDeletedPacket packet) {
-        DOWNLOADS.remove(packet.filmId());
+        discardDownload(packet.filmId());
         ClientFilmCache.delete(packet.filmId());
         ClientProjectorAudio.stopFilm(packet.filmId());
     }
 
+    public static void clearDownloads() {
+        DOWNLOADS.forEach((filmId, session) -> session.delete());
+        DOWNLOADS.clear();
+    }
+
+    public static void handleFilmAvailable(S2CFilmAvailablePacket packet) {
+        discardDownload(packet.filmId());
+        ClientFilmCache.restore(packet.filmId());
+    }
+
+    private static boolean validChunk(S2CDownloadFilmChunkPacket packet) {
+        return FilmStorage.isValidFilmId(packet.filmId()) && packet.index() >= 0 && packet.total() > 0 && packet.index() < packet.total()
+                && packet.data().length > 0 && packet.data().length <= CHUNK_SIZE
+                && (packet.index() == packet.total() - 1 || packet.data().length == CHUNK_SIZE);
+    }
+
+    private static void discardDownload(String filmId) {
+        DownloadSession session = DOWNLOADS.remove(filmId);
+        if (session != null) session.delete();
+    }
+
     private static class DownloadSession {
         private final int total;
-        private final byte[][] chunks;
+        private final Path packageFile;
+        private final FileChannel channel;
+        private final Set<Integer> received = new HashSet<>();
 
-        private DownloadSession(int total) {
+        private DownloadSession(String filmId, int total) throws IOException {
             this.total = total;
-            this.chunks = new byte[total][];
+            Path root = ClientFilmCache.root().resolve(".downloads");
+            Files.createDirectories(root);
+            this.packageFile = Files.createTempFile(root, filmId + "-", ".zip");
+            this.channel = FileChannel.open(packageFile, StandardOpenOption.WRITE);
+        }
+
+        private void write(int index, byte[] data) throws IOException {
+            if (!received.add(index)) return;
+            channel.position(Math.multiplyExact((long) index, CHUNK_SIZE));
+            ByteBuffer buffer = ByteBuffer.wrap(data);
+            while (buffer.hasRemaining()) channel.write(buffer);
         }
 
         private boolean complete() {
-            for (byte[] chunk : chunks) if (chunk == null) return false;
-            return true;
+            return received.size() == total;
         }
 
-        private byte[] join() throws IOException {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            for (byte[] chunk : chunks) out.write(chunk);
-            return out.toByteArray();
+        private Path finish() throws IOException {
+            channel.close();
+            return packageFile;
+        }
+
+        private void delete() {
+            try {
+                channel.close();
+            } catch (IOException ignored) {
+            }
+            try {
+                Files.deleteIfExists(packageFile);
+            } catch (IOException e) {
+                CreateCinema.LOGGER.debug("Failed to delete temporary film download {}", packageFile, e);
+            }
         }
     }
 }

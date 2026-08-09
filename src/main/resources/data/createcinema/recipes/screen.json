@@ -1,9 +1,0 @@
-{
-  "type": "minecraft:crafting_shaped",
-  "pattern": ["WWW", "WPW", "WWW"],
-  "key": {
-    "W": { "item": "minecraft:white_wool" },
-    "P": { "item": "minecraft:paper" }
-  },
-  "result": { "id": "createcinema:screen", "count": 4 }
-}

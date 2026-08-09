@@ -1,5 +1,7 @@
 package com.yfy.createcinema.client;
 
+import com.yfy.createcinema.NetworkVideoQuality;
+
 import java.io.IOException;
 import java.net.URI;
 
@@ -17,8 +19,12 @@ final class IqiyiVideoResolver {
         }
     }
 
-    static IOException unsupported(IOException cause) {
-        return new IOException("iQiyi did not expose a directly playable m3u8/mp4 stream. "
-                + "This page uses the web player VRS/signature path and may require browser state, login, VIP, or DRM.", cause);
+    static BilibiliResolver.ResolvedMedia resolve(String input, NetworkVideoQuality quality) throws IOException {
+        return BrowserPlaybackResolver.resolve(input, quality, BrowserPlaybackResolver.Provider.IQIYI);
+    }
+
+    static BilibiliResolver.ResolvedPlaylist discoverPlaylist(String input) {
+        return new BilibiliResolver.ResolvedPlaylist(
+                BrowserPlaybackResolver.playlist(input, BrowserPlaybackResolver.Provider.IQIYI), 0);
     }
 }

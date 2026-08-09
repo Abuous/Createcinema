@@ -6,13 +6,19 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Platform-specific browser session used for signed Douyin requests.
+ * Platform-specific browser session used for signed playback requests.
  *
  * <p>Every implementation mirrors the semantic of the native WebView2 engine: keep a persistent
  * browser profile, let the user log in through a real browser session, then intercept the matching
  * authenticated XHR/JSON response body and hand it to the caller as raw bytes.</p>
  */
 interface DouyinBrowserBackend {
+    enum AuthorizationState {
+        AUTHORIZED,
+        UNAUTHORIZED,
+        UNKNOWN
+    }
+
     /** Profile directory name under {@code <game>/createcinema/browser}. */
     String profileDirName();
 
@@ -28,9 +34,17 @@ interface DouyinBrowserBackend {
     byte[] capture(String navigationUrl, String expectedHost, List<String> expectedPaths,
                    String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException;
 
+    default String cookieHeader(String url) throws IOException {
+        return "";
+    }
+
     void hide();
 
     boolean isAuthorized();
+
+    default AuthorizationState authorizationState(String url, List<String> cookieNames) {
+        return isAuthorized() ? AuthorizationState.AUTHORIZED : AuthorizationState.UNAUTHORIZED;
+    }
 
     void shutdown();
 }

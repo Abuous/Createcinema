@@ -72,7 +72,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         pitch = playbackRate(projector, sourceMedia);
         attenuation = SoundInstance.Attenuation.LINEAR;
         sound = new Sound(location, ConstantFloat.of(1.0f), ConstantFloat.of(1.0f), 1,
-                Sound.Type.FILE, true, false, 32);
+                Sound.Type.FILE, true, false, 48);
     }
 
     @Override

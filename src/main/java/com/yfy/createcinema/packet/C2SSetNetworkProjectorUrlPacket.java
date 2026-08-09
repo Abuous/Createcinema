@@ -24,7 +24,7 @@ public record C2SSetNetworkProjectorUrlPacket(BlockPos projectorPos, String url)
             if (!(context.player() instanceof ServerPlayer player) || !(player.containerMenu instanceof NetworkProjectorMenu menu)
                     || !menu.pos.equals(projectorPos) || !menu.stillValid(player)
                     || !(player.level().getBlockEntity(projectorPos) instanceof NetworkProjectorBlockEntity projector)) return;
-            String value = url.trim(); if (!value.isEmpty() && !isValidWebUrl(value)) return; projector.setUrl(value);
+            String value = url.trim(); if (!value.isEmpty() && !isValidWebUrl(value)) return; projector.setUrl(value, player.getUUID());
         });
     }
     private static boolean isValidWebUrl(String value) {

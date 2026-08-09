@@ -1,6 +1,8 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "loader": "createcinema:bedrock",
+  "source": "createcinema:bedrock/block/black_screen.json",
   "textures": {
-    "all": "minecraft:block/black_wool"
+    "texture": "createcinema:block/black_screen",
+    "particle": "createcinema:block/black_screen"
   }
 }

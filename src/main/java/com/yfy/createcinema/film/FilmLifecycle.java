@@ -1,8 +1,10 @@
 package com.yfy.createcinema.film;
 
 import com.yfy.createcinema.CreateCinema;
+import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.item.FilmItem;
 import com.yfy.createcinema.packet.S2CFilmDeletedPacket;
+import com.yfy.createcinema.packet.S2CFilmAvailablePacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -28,6 +30,28 @@ public final class FilmLifecycle {
             CreateCinema.LOGGER.info("Registered film copy {} for {} ({} references)", copyId, filmId,
                     data.referenceCount(filmId));
         }
+    }
+
+    public static ItemStack createFilmCopy(MinecraftServer server, String filmId) throws IOException {
+        FilmReferenceData data = FilmReferenceData.get(server);
+        if (!FilmStorage.isValidFilmId(filmId) || data.isDeleted(filmId) || !FilmStorage.exists(server, filmId)) {
+            return ItemStack.EMPTY;
+        }
+
+        FilmMetadata metadata = FilmStorage.readServerMetadata(server, filmId);
+        if (metadata == null || !filmId.equals(metadata.id())) return ItemStack.EMPTY;
+
+        ItemStack stack = FilmItem.create(switch (metadata.mediaTypeValue()) {
+            case IMAGE -> ModRegistry.BLANK_IMAGE.get();
+            case ALBUM -> ModRegistry.BLANK_ALBUM.get();
+            case SLIDES -> ModRegistry.BLANK_SLIDES.get();
+            case VIDEO -> ModRegistry.FILM.get();
+        }, metadata.id(), metadata.title());
+        FilmItem.setDurationSeconds(stack, metadata.durationSeconds());
+        FilmItem.setRecorded(stack, metadata.id(), metadata.title(), metadata.durationSeconds(),
+                metadata.mediaTypeValue(), metadata.frameCount());
+        registerCopy(server, stack);
+        return stack;
     }
 
     public static void releaseDestroyedCopy(MinecraftServer server, ItemStack stack) {
@@ -142,6 +166,13 @@ public final class FilmLifecycle {
             broadcastDeleted(server, filmId);
         }
         return filmIds.size();
+    }
+
+    public static void restoreFilm(MinecraftServer server, String filmId) {
+        FilmReferenceData.get(server).restoreDeleted(filmId);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            new S2CFilmAvailablePacket(filmId).sendTo(player);
+        }
     }
 
     public static void syncDeletedFilms(ServerPlayer player) {

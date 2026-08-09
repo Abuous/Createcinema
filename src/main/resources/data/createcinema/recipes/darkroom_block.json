@@ -1,9 +1,0 @@
-{
-  "type": "minecraft:crafting_shaped",
-  "pattern": ["CCC", "CWC", "CCC"],
-  "key": {
-    "C": { "item": "minecraft:black_concrete" },
-    "W": { "item": "minecraft:black_wool" }
-  },
-  "result": { "id": "createcinema:darkroom_block", "count": 8 }
-}

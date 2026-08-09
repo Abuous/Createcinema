@@ -1,11 +1,11 @@
 package com.yfy.createcinema.client;
 
 import com.yfy.createcinema.CreateCinema;
-import com.yfy.createcinema.audio.CinemaAudioNetwork;
 import com.yfy.createcinema.block.SpeakerBlock;
 import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
@@ -90,7 +90,6 @@ public final class ClientNetworkProjectorAudio {
             return;
         }
         String key = source.key();
-        long gameTime = minecraft.level.getGameTime();
         ActiveSource active = ACTIVE.get(key);
         if (active != null && active.shared != null && active.shared.failure() != null) {
             CreateCinema.LOGGER.debug("Recreating live network audio after shared decoder failure for {}", key,
@@ -108,12 +107,10 @@ public final class ClientNetworkProjectorAudio {
                             ? new SharedNetworkAudio(source.media(), () -> ClientNetworkProjectorStreams.mediaTime(projector))
                             : null);
             ACTIVE.put(key, active);
-        } else if (gameTime < active.nextTopologyScan) {
-            return;
         }
-        active.nextTopologyScan = gameTime + 10L;
 
-        List<BlockPos> speakers = CinemaAudioNetwork.findSpeakers(projector.getLevel(), projector.getBlockPos()).stream()
+        ClientCableIndex.ensure(projector.getLevel(), projector.getBlockPos(), ClientCableIndex.Kind.NETWORK);
+        List<BlockPos> speakers = ClientCableIndex.speakersOf(projector.getLevel(), projector.getBlockPos()).stream()
                 .sorted(Comparator.comparingDouble(pos -> minecraft.player == null ? 0.0
                         : minecraft.player.distanceToSqr(ClientPhysicalAudioCompat.worldPosition(projector, pos))))
                 .toList();
@@ -149,7 +146,37 @@ public final class ClientNetworkProjectorAudio {
         }
     }
 
+    public static void notifySpeakers(Level level, BlockPos projectorPos, Set<BlockPos> removed, Set<BlockPos> gained) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) return;
+        if (!(level.getBlockEntity(projectorPos) instanceof NetworkProjectorBlockEntity projector)) return;
+        for (ActiveSource active : ACTIVE.values()) {
+            if (!sameProjector(active.projector, projector)) continue;
+            for (BlockPos speaker : removed) {
+                ActiveAudio current = active.speakers.remove(speaker);
+                if (current != null) {
+                    CreateCinema.LOGGER.info("Stopping network audio at disconnected speaker {} for projector {}",
+                            speaker, projectorPos);
+                    stopSound(minecraft, current.sound);
+                }
+            }
+            if (gained.isEmpty()) continue;
+            ClientNetworkProjectorStreams.AudioSource currentSource = ClientNetworkProjectorStreams.audioSource(projector);
+            if (currentSource == null || !active.source.key().equals(currentSource.key())) continue;
+            for (BlockPos speaker : gained) {
+                if (active.speakers.containsKey(speaker)) continue;
+                NetworkProjectorSoundInstance sound = new NetworkProjectorSoundInstance(projector, speaker, active.source,
+                        active.shared);
+                active.speakers.put(speaker, new ActiveAudio(speaker, sound));
+                CreateCinema.LOGGER.info("Scheduling {} network audio at speaker {} (event-driven)",
+                        active.source.media().live() ? "live" : "video", speaker);
+                minecraft.getSoundManager().play(sound);
+            }
+        }
+    }
+
     public static void stop(NetworkProjectorBlockEntity projector) {
+        ClientCableIndex.remove(projector.getLevel(), projector.getBlockPos());
         ACTIVE.entrySet().removeIf(entry -> {
             if (!sameProjector(entry.getValue().projector, projector)) return false;
             stopSource(entry.getValue());
@@ -158,6 +185,7 @@ public final class ClientNetworkProjectorAudio {
     }
 
     public static void stopAll() {
+        ClientCableIndex.removeAll();
         ACTIVE.values().forEach(ClientNetworkProjectorAudio::stopSource);
         ACTIVE.clear();
         DIAGNOSTIC_STATE.clear();
@@ -204,7 +232,6 @@ public final class ClientNetworkProjectorAudio {
         private final ClientNetworkProjectorStreams.AudioSource source;
         private final SharedNetworkAudio shared;
         private final Map<BlockPos, ActiveAudio> speakers = new ConcurrentHashMap<>();
-        private long nextTopologyScan;
 
         private ActiveSource(NetworkProjectorBlockEntity projector, ClientNetworkProjectorStreams.AudioSource source,
                              SharedNetworkAudio shared) {

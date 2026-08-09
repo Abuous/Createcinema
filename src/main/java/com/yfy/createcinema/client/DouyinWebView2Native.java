@@ -65,7 +65,7 @@ final class DouyinWebView2Native {
     }
 
     static byte[] capture(String navigationUrl, String host, List<String> paths,
-                          String queryName, String queryValue, Duration timeout) throws IOException {
+                           String queryName, String queryValue, Duration timeout) throws IOException {
         return capture0(navigationUrl, host, paths.toArray(String[]::new), queryName, queryValue,
                 Math.toIntExact(timeout.toMillis()));
     }
@@ -75,7 +75,17 @@ final class DouyinWebView2Native {
     }
 
     static boolean isAuthorized() {
-        return loaded && isAuthorized0();
+        try {
+            return loaded && hasAuthorizationCookies0("https://www.douyin.com/",
+                    new String[]{"sessionid", "sessionid_ss", "sid_tt"});
+        } catch (IOException error) {
+            return false;
+        }
+    }
+
+    static boolean hasAuthorizationCookies(String url, List<String> cookieNames) throws IOException {
+        if (!loaded) throw new IOException("WebView2 is not initialized");
+        return hasAuthorizationCookies0(url, cookieNames.toArray(String[]::new));
     }
 
     static synchronized void shutdown() {
@@ -95,6 +105,8 @@ final class DouyinWebView2Native {
     private static native void hide0();
 
     private static native boolean isAuthorized0();
+
+    private static native boolean hasAuthorizationCookies0(String url, String[] cookieNames) throws IOException;
 
     private static native void shutdown0();
 }

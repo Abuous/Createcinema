@@ -7,6 +7,7 @@ public final class ClientConfig {
     public static final ModConfigSpec SPEC;
     private static final ModConfigSpec.ConfigValue<String> LEGACY_DOUYIN_COOKIE;
     private static final ModConfigSpec.BooleanValue DOUYIN_BROWSER_AUTHORIZATION;
+    private static final ModConfigSpec.BooleanValue IQIYI_BROWSER_AUTHORIZATION;
     private static final ModConfigSpec.IntValue SCREEN_MAX_WIDTH;
     private static final ModConfigSpec.IntValue SCREEN_MAX_HEIGHT;
     private static final ModConfigSpec.IntValue SCREEN_ANCHOR_RADIUS;
@@ -16,7 +17,7 @@ public final class ClientConfig {
     private static final ModConfigSpec.BooleanValue BURN_HARDWARE_DECODING;
     private static final ModConfigSpec.BooleanValue BURN_HARDWARE_ENCODING;
     private static final ModConfigSpec.BooleanValue PROJECTOR_HARDWARE_DECODING;
-    private static volatile Runnable douyinBrowserShutdown = () -> { };
+    private static volatile java.util.function.Consumer<String> browserShutdown = provider -> { };
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -29,6 +30,11 @@ public final class ClientConfig {
                 .comment("Use an embedded local browser session for signed Douyin requests ",
                         "(WebView2 on Windows x86_64, Chromium/Edge over DevTools Protocol on Linux ",
                         "and Windows-on-ARM, Android WebView).")
+                .define("browserAuthorization", false);
+        builder.pop();
+        builder.push("iqiyi");
+        IQIYI_BROWSER_AUTHORIZATION = builder
+                .comment("Use an isolated local browser profile for authorized iQiyi playback requests.")
                 .define("browserAuthorization", false);
         builder.pop();
         builder.push("projector");
@@ -77,11 +83,30 @@ public final class ClientConfig {
         DOUYIN_BROWSER_AUTHORIZATION.set(enabled);
         DOUYIN_BROWSER_AUTHORIZATION.save();
         clearLegacyDouyinCookie();
-        if (wasEnabled && !enabled) douyinBrowserShutdown.run();
+        if (wasEnabled && !enabled) browserShutdown.accept("douyin");
+    }
+
+    public static boolean iqiyiBrowserAuthorization() {
+        return IQIYI_BROWSER_AUTHORIZATION.get();
+    }
+
+    public static void setIqiyiBrowserAuthorization(boolean enabled) {
+        setBrowserAuthorization(IQIYI_BROWSER_AUTHORIZATION, "iqiyi", enabled);
+    }
+
+    private static void setBrowserAuthorization(ModConfigSpec.BooleanValue setting, String provider, boolean enabled) {
+        boolean wasEnabled = setting.get();
+        setting.set(enabled);
+        setting.save();
+        if (wasEnabled && !enabled) browserShutdown.accept(provider);
     }
 
     public static void setDouyinBrowserShutdown(Runnable shutdown) {
-        douyinBrowserShutdown = shutdown == null ? () -> { } : shutdown;
+        browserShutdown = shutdown == null ? provider -> { } : provider -> shutdown.run();
+    }
+
+    public static void setBrowserShutdown(java.util.function.Consumer<String> shutdown) {
+        browserShutdown = shutdown == null ? provider -> { } : shutdown;
     }
 
     public static String legacyDouyinCookie() {

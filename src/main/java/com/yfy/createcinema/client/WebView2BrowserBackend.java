@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
-/** Windows x86_64 backend: the embedded native WebView2 engine (unchanged behaviour). */
+/** Windows x86_64 backend: the embedded native WebView2 engine. */
 final class WebView2BrowserBackend implements DouyinBrowserBackend {
     WebView2BrowserBackend() {
     }
@@ -37,7 +37,7 @@ final class WebView2BrowserBackend implements DouyinBrowserBackend {
 
     @Override
     public byte[] capture(String navigationUrl, String expectedHost, List<String> expectedPaths,
-                          String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
+                           String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
         return DouyinWebView2Native.capture(navigationUrl, expectedHost, expectedPaths,
                 expectedQueryName, expectedQueryValue, timeout);
     }
@@ -50,6 +50,16 @@ final class WebView2BrowserBackend implements DouyinBrowserBackend {
     @Override
     public boolean isAuthorized() {
         return DouyinWebView2Native.isAuthorized();
+    }
+
+    @Override
+    public AuthorizationState authorizationState(String url, List<String> cookieNames) {
+        try {
+            return DouyinWebView2Native.hasAuthorizationCookies(url, cookieNames)
+                    ? AuthorizationState.AUTHORIZED : AuthorizationState.UNAUTHORIZED;
+        } catch (IOException | RuntimeException error) {
+            return AuthorizationState.UNKNOWN;
+        }
     }
 
     @Override

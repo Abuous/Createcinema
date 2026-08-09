@@ -1,5 +1,9 @@
 package com.yfy.createcinema.client;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,16 +54,24 @@ final class HlsStreamCache {
     }
 
     static void prepare(String url, String referer) throws IOException, InterruptedException {
+        prepare(url, referer, Map.of());
+    }
+
+    static void prepare(String url, String referer, Map<String, String> headers) throws IOException, InterruptedException {
         if (!isHls(url) || PLAYLISTS.containsKey(url)) return;
-        Playlist playlist = loadPlaylist(URI.create(url), referer, 0);
+        Playlist playlist = loadPlaylist(URI.create(url), referer, headers, 0);
         PLAYLISTS.put(url, playlist);
     }
 
     static void prepareAsync(String url, String referer) {
+        prepareAsync(url, referer, Map.of());
+    }
+
+    static void prepareAsync(String url, String referer, Map<String, String> headers) {
         if (!isHls(url) || PLAYLISTS.containsKey(url)) return;
         submitPrefetch(() -> {
             try {
-                prepare(url, referer);
+                prepare(url, referer, headers);
             } catch (IOException | InterruptedException ignored) {
             }
         });
@@ -78,7 +90,7 @@ final class HlsStreamCache {
             Segment segment = playlist.segments.get(start + offset);
             submitPrefetch(() -> {
                 try {
-                    segmentBytes(segment.uri, playlist.referer);
+                    segmentBytes(segment.uri, playlist.source, playlist.referer, playlist.headers);
                 } catch (IOException ignored) {
                 }
             });
@@ -86,10 +98,14 @@ final class HlsStreamCache {
     }
 
     static InputStream open(String url, String referer, double startSeconds) throws IOException {
+        return open(url, referer, Map.of(), startSeconds);
+    }
+
+    static InputStream open(String url, String referer, Map<String, String> headers, double startSeconds) throws IOException {
         Playlist playlist = PLAYLISTS.get(url);
         if (playlist == null) {
             try {
-                playlist = loadPlaylist(URI.create(url), referer, 0);
+                playlist = loadPlaylist(URI.create(url), referer, headers, 0);
                 PLAYLISTS.put(url, playlist);
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
@@ -121,9 +137,10 @@ final class HlsStreamCache {
         }
     }
 
-    private static Playlist loadPlaylist(URI uri, String referer, int depth) throws IOException, InterruptedException {
+    private static Playlist loadPlaylist(URI uri, String referer, Map<String, String> headers, int depth)
+            throws IOException, InterruptedException {
         if (depth > 2) throw new IOException("HLS master playlist nesting is too deep");
-        String text = requestBytes(uri, referer, MAX_PLAYLIST_BYTES, "HLS playlist").body;
+        String text = requestBytes(uri, referer, headers, MAX_PLAYLIST_BYTES, "HLS playlist").body;
         String[] lines = text.replace("\r", "").split("\n");
         List<Variant> variants = new ArrayList<>();
         List<Segment> segments = new ArrayList<>();
@@ -161,12 +178,12 @@ final class HlsStreamCache {
             Variant selected = variants.stream().filter(v -> v.bandwidth <= 8_000_000)
                     .max(Comparator.comparingLong(Variant::bandwidth))
                     .orElseGet(() -> variants.stream().min(Comparator.comparingLong(Variant::bandwidth)).orElseThrow());
-            return loadPlaylist(selected.uri, referer, depth + 1);
+            return loadPlaylist(selected.uri, referer, headers, depth + 1);
         }
         if (unsupportedMap || encrypted || segments.isEmpty()) {
             throw new IOException("HLS playlist requires unsupported encryption or fragmented MP4");
         }
-        Playlist playlist = new Playlist(List.copyOf(segments), totalDuration, referer);
+        Playlist playlist = new Playlist(uri, List.copyOf(segments), totalDuration, referer, Map.copyOf(headers));
         if (PLAYLISTS.size() >= 16) {
             String oldest = PLAYLISTS.keySet().stream().findFirst().orElse(null);
             if (oldest != null) PLAYLISTS.remove(oldest);
@@ -186,7 +203,8 @@ final class HlsStreamCache {
         }
     }
 
-    private static byte[] segmentBytes(URI uri, String referer) throws IOException {
+    private static byte[] segmentBytes(URI uri, URI manifestUri, String referer, Map<String, String> headers)
+            throws IOException {
         synchronized (SEGMENTS) {
             byte[] cached = SEGMENTS.get(uri);
             if (cached != null) return cached;
@@ -196,7 +214,11 @@ final class HlsStreamCache {
         CompletableFuture<byte[]> future = existing == null ? created : existing;
         if (existing == null) {
             try {
-                created.complete(requestBytes(uri, referer, MAX_SEGMENT_BYTES, "HLS segment").bytes);
+                ResponseBytes response = requestBytes(segmentRequestUri(uri, manifestUri), referer, headers,
+                        MAX_SEGMENT_BYTES, "HLS segment");
+                URI dispatched = dispatchUri(response.body);
+                created.complete(dispatched == null ? response.bytes
+                        : requestBytes(dispatched, referer, headers, MAX_SEGMENT_BYTES, "HLS segment").bytes);
             } catch (IOException | InterruptedException error) {
                 created.completeExceptionally(error);
             }
@@ -231,12 +253,74 @@ final class HlsStreamCache {
         }
     }
 
-    private static ResponseBytes requestBytes(URI uri, String referer, int limit, String kind)
+    private static URI segmentRequestUri(URI segment, URI manifest) {
+        String host = segment.getHost();
+        if (host == null || !host.equalsIgnoreCase("data.video.iqiyi.com")) return segment;
+        Map<String, String> query = new LinkedHashMap<>();
+        appendQuery(query, segment.getRawQuery(), false);
+        appendQuery(query, manifest.getRawQuery(), true);
+        query.putIfAbsent("pv", "pv=0.1");
+        query.putIfAbsent("cross-domain", "cross-domain=1");
+        String path = segment.getRawPath() == null ? "/" : segment.getRawPath();
+        return URI.create("https://pcw-data.video.iqiyi.com" + path + "?" + String.join("&", query.values()));
+    }
+
+    private static void appendQuery(Map<String, String> target, String rawQuery, boolean missingOnly) {
+        if (rawQuery == null || rawQuery.isBlank()) return;
+        for (String parameter : rawQuery.split("&")) {
+            if (parameter.isBlank()) continue;
+            int equals = parameter.indexOf('=');
+            String name = equals < 0 ? parameter : parameter.substring(0, equals);
+            if (missingOnly) target.putIfAbsent(name, parameter);
+            else target.put(name, parameter);
+        }
+    }
+
+    private static URI dispatchUri(String body) {
+        if (body == null || body.isBlank() || body.charAt(0) != '{') return null;
+        try {
+            String url = dispatchUrl(JsonParser.parseString(body), 0);
+            return url.isBlank() ? null : URI.create(url);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static String dispatchUrl(JsonElement element, int depth) {
+        if (element == null || depth > 8) return "";
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            for (var entry : object.entrySet()) {
+                if ((entry.getKey().equalsIgnoreCase("url") || entry.getKey().equals("l"))
+                        && entry.getValue().isJsonPrimitive()) {
+                    String value = entry.getValue().getAsString();
+                    if (VideoResolverHttp.isWebUrl(value)) return value;
+                }
+            }
+            for (JsonElement child : object.asMap().values()) {
+                String found = dispatchUrl(child, depth + 1);
+                if (!found.isBlank()) return found;
+            }
+        } else if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                String found = dispatchUrl(child, depth + 1);
+                if (!found.isBlank()) return found;
+            }
+        }
+        return "";
+    }
+
+    private static ResponseBytes requestBytes(URI uri, String referer, Map<String, String> headers, int limit, String kind)
             throws IOException, InterruptedException {
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds("HLS segment".equals(kind) ? 5 : 10))
                 .header("User-Agent", BilibiliResolver.USER_AGENT).GET();
         if (referer != null && !referer.isBlank()) builder.header("Referer", referer);
+        headers.forEach((name, value) -> {
+            if (!name.equalsIgnoreCase("Referer") && !name.equalsIgnoreCase("User-Agent") && !value.isBlank()) {
+                builder.header(name, value);
+            }
+        });
         HttpResponse<byte[]> response = HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
         if (response.statusCode() / 100 != 2) throw new IOException(kind + " returned HTTP " + response.statusCode());
         byte[] bytes = response.body();
@@ -272,7 +356,8 @@ final class HlsStreamCache {
         public int read(byte[] bytes, int offset, int length) throws IOException {
             while (current == null || current.available() == 0) {
                 if (index >= playlist.segments.size()) return -1;
-                current = new ByteArrayInputStream(segmentBytes(playlist.segments.get(index).uri, playlist.referer));
+                current = new ByteArrayInputStream(segmentBytes(playlist.segments.get(index).uri,
+                        playlist.source, playlist.referer, playlist.headers));
                 prefetch(index + 1);
                 prefetch(index + 2);
                 index++;
@@ -285,14 +370,15 @@ final class HlsStreamCache {
             Segment segment = playlist.segments.get(i);
             submitPrefetch(() -> {
                 try {
-                    segmentBytes(segment.uri, playlist.referer);
+                    segmentBytes(segment.uri, playlist.source, playlist.referer, playlist.headers);
                 } catch (IOException ignored) {
                 }
             });
         }
     }
 
-    private record Playlist(List<Segment> segments, double duration, String referer) {
+    private record Playlist(URI source, List<Segment> segments, double duration, String referer,
+                            Map<String, String> headers) {
     }
 
     private record Segment(URI uri, double start, double duration) {

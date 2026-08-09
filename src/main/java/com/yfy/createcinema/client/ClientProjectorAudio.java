@@ -1,10 +1,11 @@
 package com.yfy.createcinema.client;
 
-import com.yfy.createcinema.audio.CinemaAudioNetwork;
+import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
 import com.yfy.createcinema.film.FilmMetadata;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
@@ -85,7 +86,8 @@ public final class ClientProjectorAudio {
         if (current != null && !current.sound.isStopped()) return;
         stopKey(key);
 
-        BlockPos speaker = CinemaAudioNetwork.findSpeakers(projector.getLevel(), projector.getBlockPos()).stream()
+        ClientCableIndex.ensure(projector.getLevel(), projector.getBlockPos(), ClientCableIndex.Kind.FILM);
+        BlockPos speaker = ClientCableIndex.speakersOf(projector.getLevel(), projector.getBlockPos()).stream()
                 .min((first, second) -> Double.compare(distanceToPlayer(minecraft, projector, first),
                         distanceToPlayer(minecraft, projector, second)))
                 .orElse(null);
@@ -98,8 +100,37 @@ public final class ClientProjectorAudio {
         minecraft.getSoundManager().play(sound);
     }
 
+    public static void notifySpeakers(Level level, BlockPos projectorPos, Set<BlockPos> removed, Set<BlockPos> gained) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null || minecraft.player == null) return;
+        if (!(level.getBlockEntity(projectorPos) instanceof ProjectorBlockEntity projector)) return;
+        String key = sourceKey(projector);
+        ActiveAudio current = ACTIVE.get(key);
+        if (current == null) {
+            CreateCinema.LOGGER.info("Film audio topology changed at {} with no active sound: removed={}, gained={}",
+                    projectorPos, removed, gained);
+            return;
+        }
+        if (removed.contains(current.speaker)) {
+            CreateCinema.LOGGER.info("Stopping film audio at disconnected speaker {} for projector {}",
+                    current.speaker, projectorPos);
+            stopKey(key);
+            return;
+        }
+        if (gained.isEmpty()) return;
+        double currentDistance = distanceToPlayer(minecraft, projector, current.speaker);
+        for (BlockPos speaker : gained) {
+            if (distanceToPlayer(minecraft, projector, speaker) < currentDistance) {
+                CreateCinema.LOGGER.info("Restarting film audio for closer speaker {} at projector {}", speaker, projectorPos);
+                stopKey(key);
+                return;
+            }
+        }
+    }
+
     public static void stop(ProjectorBlockEntity projector) {
         Minecraft minecraft = Minecraft.getInstance();
+        ClientCableIndex.remove(projector.getLevel(), projector.getBlockPos());
         ACTIVE.entrySet().removeIf(entry -> {
             if (entry.getValue().projector != projector) return false;
             minecraft.getSoundManager().stop(entry.getValue().sound);
@@ -118,6 +149,7 @@ public final class ClientProjectorAudio {
 
     public static void stopAll() {
         Minecraft minecraft = Minecraft.getInstance();
+        ClientCableIndex.removeAll();
         ACTIVE.values().forEach(active -> minecraft.getSoundManager().stop(active.sound));
         ACTIVE.clear();
         TOUCHED.clear();

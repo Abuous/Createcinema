@@ -59,12 +59,14 @@ public class NetworkFfmpegAudioStream implements AudioStream {
             ClientVideoBurner.awaitFfmpeg();
             live = source.live();
             boolean hlsUrl = !live && HlsStreamCache.isHls(source.audioUrl());
-            if (hlsUrl && !HlsStreamCache.isPrepared(source.audioUrl())) HlsStreamCache.prepare(source.audioUrl(), source.referer());
+            if (hlsUrl && !HlsStreamCache.isPrepared(source.audioUrl())) {
+                HlsStreamCache.prepare(source.audioUrl(), source.referer(), source.headers());
+            }
             boolean hls = hlsUrl && HlsStreamCache.isPrepared(source.audioUrl());
             double requestedStart = wrap(startSeconds.getAsDouble(), source.durationSeconds());
-            openedInput = hls ? HlsStreamCache.open(source.audioUrl(), source.referer(), requestedStart) : null;
+            openedInput = hls ? HlsStreamCache.open(source.audioUrl(), source.referer(), source.headers(), requestedStart) : null;
             opened = hls ? new FFmpegFrameGrabber(openedInput, 0) : new FFmpegFrameGrabber(source.audioUrl());
-            ClientNetworkProjectorStreams.configure(opened, source.referer());
+            ClientNetworkProjectorStreams.configure(opened, source.referer(), source.headers());
             if (hls) opened.setFormat("mpegts");
             if (source.live() && source.audioUrl().contains(".flv")) opened.setFormat("flv");
             opened.setVideoStream(-1);
@@ -78,9 +80,9 @@ public class NetworkFfmpegAudioStream implements AudioStream {
                     opened.close();
                     openedInput.close();
                     requestedStart = corrected;
-                    openedInput = HlsStreamCache.open(source.audioUrl(), source.referer(), requestedStart);
+                    openedInput = HlsStreamCache.open(source.audioUrl(), source.referer(), source.headers(), requestedStart);
                     opened = new FFmpegFrameGrabber(openedInput, 0);
-                    ClientNetworkProjectorStreams.configure(opened, source.referer());
+                    ClientNetworkProjectorStreams.configure(opened, source.referer(), source.headers());
                     opened.setFormat("mpegts");
                     opened.setVideoStream(-1);
                     opened.start();

@@ -26,7 +26,7 @@ public class BurnerScreen extends AbstractContainerScreen<BurnerMenu> {
     @Override
     protected void init() {
         super.init();
-        pathField = new EditBox(font, leftPos + 12, topPos + 32, 200, 18, Component.translatable("gui.createcinema.video_path"));
+        pathField = new EditBox(font, leftPos + 12, topPos + 32, 200, 18, Component.translatable("gui.createcinema.media_path"));
         pathField.setMaxLength(1024);
         addRenderableWidget(pathField);
         addRenderableWidget(CycleButton.builder(this::qualityLabel)
@@ -37,7 +37,7 @@ public class BurnerScreen extends AbstractContainerScreen<BurnerMenu> {
                         (button, value) -> quality = value));
         burnButton = addRenderableWidget(Button.builder(Component.translatable("gui.createcinema.burn"), button -> {
             if (menu.hasBlankFilm()) {
-                ClientVideoBurner.startBurn(menu.pos, pathField.getValue(), quality);
+                ClientVideoBurner.startBurn(menu.pos, pathField.getValue(), quality, menu.getBlankMediaType());
             }
         }).bounds(leftPos + 176, topPos + 56, 72, 20).build());
     }
@@ -56,7 +56,7 @@ public class BurnerScreen extends AbstractContainerScreen<BurnerMenu> {
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         guiGraphics.drawString(font, title, 12, 10, 0x404040, false);
-        guiGraphics.drawString(font, Component.translatable("gui.createcinema.video_path"), 12, 22, 0x404040, false);
+        guiGraphics.drawString(font, Component.translatable("gui.createcinema.media_path"), 12, 22, 0x404040, false);
 
         var burner = menu.getBurner();
         if (burner != null && !burner.hasNoFilm()) {

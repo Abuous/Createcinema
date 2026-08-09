@@ -126,9 +126,9 @@ bool queryMatches(const std::wstring& query, const std::wstring& name, const std
         size_t end = query.find(L'&', start);
         if (end == std::wstring::npos) end = query.size();
         size_t equals = query.find(L'=', start);
-        if (equals != std::wstring::npos && equals < end &&
-            query.substr(start, equals - start) == name && query.substr(equals + 1, end - equals - 1) == value) {
-            return true;
+        if (equals != std::wstring::npos && equals < end && query.substr(start, equals - start) == name) {
+            std::wstring candidate = query.substr(equals + 1, end - equals - 1);
+            if (candidate == value) return true;
         }
         if (end == query.size()) break;
         start = end + 1;
@@ -278,6 +278,57 @@ public:
 
     bool authorized() const {
         return authorized_.load();
+    }
+
+    bool hasAuthorizationCookies(const std::wstring& url, std::vector<std::wstring> cookieNames,
+                                 bool& authorized, std::string& error) {
+        auto operation = std::make_shared<Operation>();
+        if (!submit([this, operation, url, cookieNames = std::move(cookieNames)]() mutable {
+                if (!webview2_) {
+                    operation->fail("WebView2 is not ready");
+                    return;
+                }
+                ComPtr<ICoreWebView2CookieManager> manager;
+                if (FAILED(webview2_->get_CookieManager(&manager)) || !manager) {
+                    operation->fail("Could not obtain the WebView2 cookie manager");
+                    return;
+                }
+                HRESULT result = manager->GetCookies(
+                        url.c_str(),
+                        Callback<ICoreWebView2GetCookiesCompletedHandler>(
+                                [operation, cookieNames = std::move(cookieNames)](
+                                        HRESULT result, ICoreWebView2CookieList* cookies) -> HRESULT {
+                                    if (FAILED(result) || cookies == nullptr) {
+                                        operation->fail("Could not read WebView2 cookies");
+                                        return S_OK;
+                                    }
+                                    bool authorized = false;
+                                    UINT32 count = 0;
+                                    if (SUCCEEDED(cookies->get_Count(&count))) {
+                                        for (UINT32 index = 0; index < count && !authorized; index++) {
+                                            ComPtr<ICoreWebView2Cookie> cookie;
+                                            if (FAILED(cookies->GetValueAtIndex(index, &cookie)) || !cookie) continue;
+                                            wchar_t* rawName = nullptr;
+                                            if (FAILED(cookie->get_Name(&rawName)) || !rawName) continue;
+                                            std::wstring name(rawName);
+                                            CoTaskMemFree(rawName);
+                                            for (const std::wstring& expected : cookieNames) {
+                                                if (equalsIgnoreCase(name, expected)) {
+                                                    authorized = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    operation->complete(authorized ? "1" : "0");
+                                    return S_OK;
+                                })
+                                .Get());
+                if (FAILED(result)) operation->fail("Could not request WebView2 cookies: " + hresultMessage(result));
+            }, error)) return false;
+        if (!waitOperation(operation, std::chrono::seconds(10), error, nullptr)) return false;
+        authorized = operation->result == "1";
+        return true;
     }
 
     void shutdown() {
@@ -755,6 +806,43 @@ JNIEXPORT jboolean JNICALL
 Java_com_yfy_createcinema_client_DouyinWebView2Native_isAuthorized0(JNIEnv*, jclass) {
     auto instance = currentEngine();
     return instance && instance->authorized() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_yfy_createcinema_client_DouyinWebView2Native_hasAuthorizationCookies0(
+        JNIEnv* env, jclass, jstring url, jobjectArray cookieNames) {
+    auto instance = currentEngine();
+    if (!instance) {
+        throwIOException(env, "WebView2 is not initialized");
+        return JNI_FALSE;
+    }
+    std::wstring cookieUrl = wide(env, url);
+    if (cookieUrl.empty()) {
+        throwIOException(env, "WebView2 authorization URL is empty");
+        return JNI_FALSE;
+    }
+    std::vector<std::wstring> names;
+    if (cookieNames != nullptr) {
+        jsize count = env->GetArrayLength(cookieNames);
+        names.reserve(static_cast<size_t>(count));
+        for (jsize index = 0; index < count; index++) {
+            auto value = static_cast<jstring>(env->GetObjectArrayElement(cookieNames, index));
+            std::wstring name = wide(env, value);
+            env->DeleteLocalRef(value);
+            if (!name.empty()) names.push_back(std::move(name));
+        }
+    }
+    if (names.empty()) {
+        throwIOException(env, "WebView2 authorization cookie list is empty");
+        return JNI_FALSE;
+    }
+    bool authorized = false;
+    std::string error;
+    if (!instance->hasAuthorizationCookies(cookieUrl, std::move(names), authorized, error)) {
+        throwIOException(env, error.empty() ? "Could not read WebView2 authorization cookies" : error);
+        return JNI_FALSE;
+    }
+    return authorized ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL

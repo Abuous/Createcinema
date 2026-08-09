@@ -1,8 +1,10 @@
 {
-  "parent": "minecraft:block/orientable",
+  "loader": "createcinema:bedrock",
+  "render_type": "minecraft:cutout",
+  "source": "createcinema:bedrock/block/projector.json",
+  "bones": ["root"],
   "textures": {
-    "front": "minecraft:block/observer_front",
-    "side": "minecraft:block/deepslate_tiles",
-    "top": "minecraft:block/polished_blackstone"
+    "texture": "createcinema:block/projector",
+    "particle": "createcinema:block/projector"
   }
 }

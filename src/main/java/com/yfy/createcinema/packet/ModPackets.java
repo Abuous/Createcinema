@@ -19,9 +19,16 @@ public class ModPackets {
                 C2SSetNetworkProjectorUrlPacket::handle);
         registrar.playToServer(C2SSetNetworkProjectorQualityPacket.TYPE,
                 C2SSetNetworkProjectorQualityPacket.STREAM_CODEC, C2SSetNetworkProjectorQualityPacket::handle);
+        registrar.playToServer(C2SNetworkProjectorMediaInfoPacket.TYPE,
+                C2SNetworkProjectorMediaInfoPacket.STREAM_CODEC, C2SNetworkProjectorMediaInfoPacket::handle);
+        registrar.playToServer(C2SNetworkProjectorDouyinContentPacket.TYPE,
+                C2SNetworkProjectorDouyinContentPacket.STREAM_CODEC,
+                C2SNetworkProjectorDouyinContentPacket::handle);
 
         registrar.playToClient(S2CBurnStatusPacket.TYPE, S2CBurnStatusPacket.STREAM_CODEC, S2CBurnStatusPacket::handle);
         registrar.playToClient(S2CDownloadFilmChunkPacket.TYPE, S2CDownloadFilmChunkPacket.STREAM_CODEC, S2CDownloadFilmChunkPacket::handle);
         registrar.playToClient(S2CFilmDeletedPacket.TYPE, S2CFilmDeletedPacket.STREAM_CODEC, S2CFilmDeletedPacket::handle);
+        registrar.playToClient(S2CFilmAvailablePacket.TYPE, S2CFilmAvailablePacket.STREAM_CODEC,
+                S2CFilmAvailablePacket::handle);
     }
 }

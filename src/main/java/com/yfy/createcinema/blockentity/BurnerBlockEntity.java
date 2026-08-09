@@ -4,6 +4,7 @@ import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.gui.BurnerMenu;
 import com.yfy.createcinema.item.FilmItem;
 import com.yfy.createcinema.film.FilmLifecycle;
+import com.yfy.createcinema.film.MediaType;
 import com.yfy.createcinema.packet.S2CBurnStatusPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -33,7 +34,11 @@ public class BurnerBlockEntity extends BlockEntity implements Container {
     }
 
     public boolean hasBlankFilm() {
-        return film.getItem() instanceof FilmItem && FilmItem.getFilmId(film).isBlank();
+        return FilmItem.isBlank(film);
+    }
+
+    public MediaType getBlankMediaType() {
+        return hasBlankFilm() ? FilmItem.getMediaType(film) : MediaType.VIDEO;
     }
 
     public ItemStack getFilm() {
@@ -49,9 +54,16 @@ public class BurnerBlockEntity extends BlockEntity implements Container {
     }
 
     public void writeFilmId(String filmId, String title, double durationSeconds) {
+        writeFilmId(filmId, title, durationSeconds, MediaType.VIDEO);
+    }
+
+    public void writeFilmId(String filmId, String title, double durationSeconds, MediaType mediaType) {
+        writeFilmId(filmId, title, durationSeconds, mediaType, 1);
+    }
+
+    public void writeFilmId(String filmId, String title, double durationSeconds, MediaType mediaType, int pageCount) {
         if (film.getItem() instanceof FilmItem) {
-            film = FilmItem.create(ModRegistry.FILM.get(), filmId, title);
-            FilmItem.setDurationSeconds(film, durationSeconds);
+            FilmItem.setRecorded(film, filmId, title, durationSeconds, mediaType, pageCount);
             if (level != null && !level.isClientSide && level.getServer() != null) {
                 FilmLifecycle.registerCopy(level.getServer(), film);
             }

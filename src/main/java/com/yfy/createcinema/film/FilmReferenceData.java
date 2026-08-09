@@ -92,6 +92,12 @@ public final class FilmReferenceData extends SavedData {
         return added;
     }
 
+    public boolean restoreDeleted(String filmId) {
+        if (!deletedFilms.remove(filmId)) return false;
+        setDirty();
+        return true;
+    }
+
     public Set<String> deletedFilmIds() {
         return Set.copyOf(deletedFilms);
     }

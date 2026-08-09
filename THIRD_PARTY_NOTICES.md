@@ -31,6 +31,9 @@ This file is a practical dependency notice for the current project version. If d
 | JavaCPP | Native binding runtime used by JavaCV/FFmpeg | Embedded or included at runtime. See the JavaCPP project for its Apache License 2.0 notices. |
 | FFmpeg binaries from Bytedeco presets | Video/audio decoding and encoding | Embedded or included at runtime through Bytedeco artifacts. FFmpeg components remain under their upstream LGPL/GPL license terms depending on build configuration. |
 | jsoup | HTML parsing for network video URL discovery | Embedded through Jar-in-Jar. See the jsoup project for its MIT License notices. |
+| Apache POI | Pure Java PPT/PPTX parsing and slide rendering | Embedded through Jar-in-Jar under the Apache License 2.0. |
+| Noto Sans CJK SC | Embedded fallback font for East Asian text in PPT/PPTX rendering | Embedded under the SIL Open Font License 1.1. See the upstream Noto CJK project for the complete license text. |
+| Just Enough Items (JEI) | Optional client integration for displaying Create Cinema crafting recipes | Used as an optional compile/runtime integration. JEI remains a separate mod under its upstream license. |
 | Microsoft Edge WebView2 SDK loader | Windows-only embedded Douyin authorization and authenticated network response capture | Statically linked into the native bridge under the WebView2 SDK BSD-style license. The Evergreen WebView2 Runtime is supplied and updated separately by Microsoft. |
 
 ## Online Video Services

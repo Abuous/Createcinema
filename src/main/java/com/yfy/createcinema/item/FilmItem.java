@@ -9,6 +9,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
+import com.yfy.createcinema.film.MediaType;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,9 +20,22 @@ public class FilmItem extends Item {
     public static final String TAG_COPY_ID = "CopyId";
     public static final String TAG_COMPLETED = "Completed";
     public static final String TAG_DURATION_SECONDS = "DurationSeconds";
+    public static final String TAG_MEDIA_TYPE = "MediaType";
+    public static final String TAG_PAGE_COUNT = "PageCount";
+
+    private final MediaType mediaType;
 
     public FilmItem(Properties properties) {
+        this(properties, MediaType.VIDEO);
+    }
+
+    public FilmItem(Properties properties, MediaType mediaType) {
         super(properties);
+        this.mediaType = mediaType;
+    }
+
+    public MediaType blankMediaType() {
+        return mediaType;
     }
 
     public static ItemStack create(Item item, String filmId, String title) {
@@ -30,6 +44,7 @@ public class FilmItem extends Item {
         tag.putString(TAG_FILM_ID, filmId);
         tag.putString(TAG_TITLE, title);
         tag.putBoolean(TAG_COMPLETED, false);
+        tag.putString(TAG_MEDIA_TYPE, item instanceof FilmItem film ? film.blankMediaType().id() : MediaType.VIDEO.id());
         if (!filmId.isBlank()) tag.putString(TAG_COPY_ID, newCopyId());
         stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
         if (!title.isBlank()) {
@@ -47,6 +62,46 @@ public class FilmItem extends Item {
     public static String getCopyId(ItemStack stack) {
         CustomData data = stack.get(DataComponents.CUSTOM_DATA);
         return data == null ? "" : data.copyTag().getString(TAG_COPY_ID);
+    }
+
+    public static MediaType getMediaType(ItemStack stack) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        if (data != null && data.copyTag().contains(TAG_MEDIA_TYPE)) {
+            return MediaType.fromId(data.copyTag().getString(TAG_MEDIA_TYPE));
+        }
+        return stack.getItem() instanceof FilmItem film ? film.blankMediaType() : MediaType.VIDEO;
+    }
+
+    public static boolean isBlank(ItemStack stack) {
+        return stack.getItem() instanceof FilmItem && getFilmId(stack).isBlank();
+    }
+
+    public static boolean isStatic(ItemStack stack) {
+        return getMediaType(stack).isStatic();
+    }
+
+    public static void setRecorded(ItemStack stack, String filmId, String title, double durationSeconds,
+                                   MediaType mediaType) {
+        setRecorded(stack, filmId, title, durationSeconds, mediaType, 1);
+    }
+
+    public static void setRecorded(ItemStack stack, String filmId, String title, double durationSeconds,
+                                   MediaType mediaType, int pageCount) {
+        updateData(stack, tag -> {
+            tag.putString(TAG_FILM_ID, filmId);
+            tag.putString(TAG_TITLE, title);
+            tag.putString(TAG_MEDIA_TYPE, mediaType.id());
+            tag.putBoolean(TAG_COMPLETED, false);
+            tag.putString(TAG_COPY_ID, newCopyId());
+            tag.putDouble(TAG_DURATION_SECONDS, Math.max(0.0, durationSeconds));
+            tag.putInt(TAG_PAGE_COUNT, Math.max(1, pageCount));
+        });
+        stack.set(DataComponents.ITEM_NAME, Component.literal(title));
+    }
+
+    public static int getPageCount(ItemStack stack) {
+        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
+        return data == null ? 1 : Math.max(1, data.copyTag().getInt(TAG_PAGE_COUNT));
     }
 
     public static void setCopyId(ItemStack stack, String copyId) {

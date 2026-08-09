@@ -91,11 +91,11 @@ final class AndroidWebViewBrowserBackend implements DouyinBrowserBackend {
 
     @Override
     public byte[] capture(String navigationUrl, String expectedHost, List<String> expectedPaths,
-                          String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
+                           String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
         try {
             Object body = bridge().getMethod("capture", String.class, String.class,
                             String[].class, String.class, String.class, int.class)
-                    .invoke(null, navigationUrl, expectedHost,
+                            .invoke(null, navigationUrl, expectedHost,
                             expectedPaths.toArray(String[]::new), expectedQueryName,
                             expectedQueryValue, Math.toIntExact(timeout.toMillis()));
             return body == null ? null : (byte[]) body;
@@ -118,6 +118,27 @@ final class AndroidWebViewBrowserBackend implements DouyinBrowserBackend {
             return (boolean) bridge().getMethod("isAuthorized").invoke(null);
         } catch (Throwable error) {
             return false;
+        }
+    }
+
+    @Override
+    public AuthorizationState authorizationState(String url, List<String> cookieNames) {
+        try {
+            boolean authorized = (boolean) bridge().getMethod("isAuthorized", String.class, String[].class)
+                    .invoke(null, url, cookieNames.toArray(String[]::new));
+            return authorized ? AuthorizationState.AUTHORIZED : AuthorizationState.UNAUTHORIZED;
+        } catch (Throwable error) {
+            return AuthorizationState.UNKNOWN;
+        }
+    }
+
+    @Override
+    public String cookieHeader(String url) throws IOException {
+        try {
+            Object cookies = bridge().getMethod("cookieHeader", String.class).invoke(null, url);
+            return cookies == null ? "" : cookies.toString();
+        } catch (Throwable error) {
+            throw wrap("Could not read Android WebView cookies", error);
         }
     }
 

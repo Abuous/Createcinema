@@ -18,7 +18,7 @@ public final class CinemaAudioNetwork {
     private CinemaAudioNetwork() {
     }
 
-    public static List<BlockPos> findSpeakers(Level level, BlockPos projector) {
+    public static Topology scan(Level level, BlockPos projector) {
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
         Set<BlockPos> visited = new HashSet<>();
         List<BlockPos> speakers = new ArrayList<>();
@@ -40,10 +40,17 @@ public final class CinemaAudioNetwork {
                 }
             }
         }
-        return speakers;
+        return new Topology(visited, speakers);
+    }
+
+    public static List<BlockPos> findSpeakers(Level level, BlockPos projector) {
+        return scan(level, projector).speakers();
     }
 
     public static boolean isConnected(Level level, BlockPos projector, BlockPos speaker) {
         return findSpeakers(level, projector).contains(speaker);
+    }
+
+    public record Topology(Set<BlockPos> cables, List<BlockPos> speakers) {
     }
 }

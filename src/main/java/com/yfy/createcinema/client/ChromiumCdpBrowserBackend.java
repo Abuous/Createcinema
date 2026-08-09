@@ -1,6 +1,7 @@
 package com.yfy.createcinema.client;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -201,9 +202,9 @@ final class ChromiumCdpBrowserBackend implements DouyinBrowserBackend {
         for (String pair : query.split("&")) {
             int equals = pair.indexOf('=');
             if (equals < 0) continue;
-            if (pair.substring(0, equals).equals(queryName) && pair.substring(equals + 1).equals(queryValue)) {
-                return true;
-            }
+            if (!pair.substring(0, equals).equals(queryName)) continue;
+            String candidate = pair.substring(equals + 1);
+            if (candidate.equals(queryValue)) return true;
         }
         return false;
     }
@@ -236,7 +237,7 @@ final class ChromiumCdpBrowserBackend implements DouyinBrowserBackend {
 
     @Override
     public byte[] capture(String navigationUrl, String expectedHost, List<String> expectedPaths,
-                          String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
+                           String expectedQueryName, String expectedQueryValue, Duration timeout) throws IOException {
         ensureStarted();
         ensureTab();
         synchronized (this) {
@@ -293,6 +294,28 @@ final class ChromiumCdpBrowserBackend implements DouyinBrowserBackend {
         }
     }
 
+    @Override
+    public String cookieHeader(String url) throws IOException {
+        ensureStarted();
+        ensureTab();
+        JsonArray urls = new JsonArray();
+        urls.add(url);
+        JsonObject parameters = new JsonObject();
+        parameters.add("urls", urls);
+        JsonObject result = cdp.send("Network.getCookies", parameters, sessionId,
+                COMMAND_TIMEOUT_MILLIS);
+        JsonArray cookies = result.has("cookies") ? result.getAsJsonArray("cookies") : new JsonArray();
+        StringBuilder header = new StringBuilder();
+        for (JsonElement element : cookies) {
+            if (!element.isJsonObject()) continue;
+            JsonObject cookie = element.getAsJsonObject();
+            if (!cookie.has("name") || !cookie.has("value")) continue;
+            if (!header.isEmpty()) header.append("; ");
+            header.append(cookie.get("name").getAsString()).append('=').append(cookie.get("value").getAsString());
+        }
+        return header.toString();
+    }
+
     private void setWindowState(String state) {
         if (windowId == null || headless) return;
         JsonObject bounds = new JsonObject();
@@ -311,22 +334,30 @@ final class ChromiumCdpBrowserBackend implements DouyinBrowserBackend {
 
     @Override
     public boolean isAuthorized() {
+        return authorizationState("https://www.douyin.com/", List.of(
+                "sessionid", "sessionid_ss", "sid_tt")) == AuthorizationState.AUTHORIZED;
+    }
+
+    @Override
+    public AuthorizationState authorizationState(String url, List<String> cookieNames) {
         try {
             ensureStarted();
             ensureTab();
-            JsonObject result = cdp.send("Network.getAllCookies", null, sessionId, COMMAND_TIMEOUT_MILLIS);
+            JsonArray urls = new JsonArray();
+            urls.add(url);
+            JsonObject parameters = new JsonObject();
+            parameters.add("urls", urls);
+            JsonObject result = cdp.send("Network.getCookies", parameters, sessionId, COMMAND_TIMEOUT_MILLIS);
             JsonArray cookies = result.has("cookies") ? result.getAsJsonArray("cookies") : new JsonArray();
             for (int i = 0; i < cookies.size(); i++) {
                 JsonObject cookie = cookies.get(i).getAsJsonObject();
-                if (!cookie.has("name") || !cookie.has("domain")) continue;
-                String name = cookie.get("name").getAsString();
-                if (!name.equals("sessionid") && !name.equals("sessionid_ss") && !name.equals("sid_tt")) continue;
-                String domain = cookie.get("domain").getAsString();
-                if (domain != null && domain.contains("douyin.com")) return true;
+                if (!cookie.has("name")) continue;
+                String name = cookie.get("name").getAsString().toLowerCase(java.util.Locale.ROOT);
+                if (cookieNames.contains(name)) return AuthorizationState.AUTHORIZED;
             }
-            return false;
+            return AuthorizationState.UNAUTHORIZED;
         } catch (IOException | RuntimeException error) {
-            return false;
+            return AuthorizationState.UNKNOWN;
         }
     }
 

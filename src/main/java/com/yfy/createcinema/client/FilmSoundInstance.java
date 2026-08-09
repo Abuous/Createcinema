@@ -2,7 +2,6 @@ package com.yfy.createcinema.client;
 
 import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.PlaybackSpeeds;
-import com.yfy.createcinema.audio.CinemaAudioNetwork;
 import com.yfy.createcinema.block.SpeakerBlock;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
 import com.yfy.createcinema.film.FilmMetadata;
@@ -40,7 +39,6 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
     private volatile double streamStartTime = Double.NaN;
     private volatile boolean channelStarted;
     private double expectedTime;
-    private int connectionCheck;
     private boolean stopped;
     private boolean audioClockStarted;
 
@@ -61,7 +59,7 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
         attenuation = SoundInstance.Attenuation.LINEAR;
         relative = false;
         sound = new Sound(location, ConstantFloat.of(1.0f), ConstantFloat.of(1.0f), 1,
-                Sound.Type.FILE, true, false, 32);
+                Sound.Type.FILE, true, false, 48);
     }
 
     @Override
@@ -96,14 +94,6 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
                 || minecraft.player.distanceToSqr(x, y, z) > 96.0 * 96.0) {
             stopped = true;
             return;
-        }
-
-        if (--connectionCheck <= 0) {
-            connectionCheck = 10;
-            if (!CinemaAudioNetwork.isConnected(projector.getLevel(), projectorPos, speakerPos)) {
-                stopped = true;
-                return;
-            }
         }
 
         float rate = playbackRate(projector);

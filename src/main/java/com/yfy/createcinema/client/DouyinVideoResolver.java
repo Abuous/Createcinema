@@ -84,6 +84,48 @@ final class DouyinVideoResolver {
                 normalizePlayUrl(selected.url), page.pageUrl, duration);
     }
 
+    static BilibiliResolver.ResolvedMedia resolveAuthenticatedContent(String contentId, NetworkVideoQuality quality)
+            throws IOException, InterruptedException {
+        if (contentId == null || !contentId.matches("[0-9]{1,32}")) {
+            throw new IOException("Douyin content id is invalid");
+        }
+        CachedPage cached = CACHE.get(contentId);
+        if (cached != null && cached.expiresAt > System.currentTimeMillis()) {
+            VideoCandidate selected = selectVideo(cached.page.item, quality);
+            return new BilibiliResolver.ResolvedMedia(normalizePlayUrl(selected.url),
+                    normalizePlayUrl(selected.url), cached.page.pageUrl, duration(cached.page.item));
+        }
+        if (DouyinAuthenticatedApi.hasAuthorization()) {
+            try {
+                JsonObject item = DouyinAuthenticatedApi.detail(contentId);
+                if (!contentId.equals(string(item, "aweme_id"))) {
+                    throw new IOException("Douyin browser returned a different video");
+                }
+                cacheAuthenticatedItem(item);
+                VideoCandidate selected = selectVideo(item, quality);
+                String pageUrl = contentUrl(contentId);
+                return new BilibiliResolver.ResolvedMedia(normalizePlayUrl(selected.url),
+                        normalizePlayUrl(selected.url), pageUrl, duration(item));
+            } catch (IOException error) {
+                CreateCinema.LOGGER.debug("Authenticated Douyin detail unavailable for {}; trying public page",
+                        contentId, error);
+            }
+        }
+        return resolve(contentUrl(contentId), quality);
+    }
+
+    static String contentId(String input) {
+        try {
+            return videoId(inputUrl(input));
+        } catch (IllegalArgumentException error) {
+            return null;
+        }
+    }
+
+    static String contentUrl(String contentId) {
+        return "https://www.douyin.com/video/" + contentId;
+    }
+
     static BilibiliResolver.ResolvedPlaylist discoverPlaylist(String input)
             throws IOException, InterruptedException {
         String sourceUrl = expandShortUrl(inputUrl(input));

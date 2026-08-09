@@ -31,6 +31,9 @@ Create Cinema 采用 MIT License 开源。项目使用或引用到的第三方�
 | JavaCPP | JavaCV/FFmpeg 使用的原生绑定运行时 | 作为运行时依赖或内嵌依赖使用。许可证说明以 JavaCPP 上游项目为准。 |
 | Bytedeco FFmpeg binaries | 视频/音频解码和编码 | 通过 Bytedeco 构件作为运行时依赖或内嵌依赖使用。FFmpeg 组件根据构建配置遵循其上游 LGPL/GPL 条款。 |
 | jsoup | 网络视频页面 HTML 解析 | 通过 Jar-in-Jar 内嵌。许可证说明以 jsoup 上游项目为准。 |
+| Apache POI | 使用纯 Java 解析并渲染 PPT/PPTX 幻灯片 | 通过 Jar-in-Jar 内嵌，采用 Apache License 2.0。 |
+| Noto Sans CJK SC | PPT/PPTX 东亚文字渲染的内置后备字体 | 以 SIL Open Font License 1.1 内嵌。完整许可证文本以 Noto CJK 上游项目为准。 |
+| Just Enough Items (JEI) | 可选的客户端集成，用于显示 Create Cinema 合成配方 | 作为可选的编译期/运行期集成使用。JEI 仍是遵循其上游许可证的独立模组。 |
 | Microsoft Edge WebView2 SDK loader | 仅 Windows 的抖音内嵌授权与认证网络响应捕获 | 以静态方式链接进原生桥，遵守 WebView2 SDK 的 BSD 风格许可。Evergreen WebView2 Runtime 由 Microsoft 单独提供并更新。 |
 
 ## 在线视频服务

@@ -23,8 +23,10 @@ public class ClientRuntimeEvents {
         ClientFilmVideoStreams.tick();
         ClientNetworkProjectorAudio.tick();
         ClientNetworkProjectorStreams.tick();
+        ClientCableIndex.tick(net.minecraft.client.Minecraft.getInstance().level);
     }
     @SubscribeEvent public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
+        ClientPacketHandlers.clearDownloads();
         clearPlayback();
         activeLevel = null;
     }
@@ -34,12 +36,18 @@ public class ClientRuntimeEvents {
             if (blockEntity instanceof NetworkProjectorBlockEntity projector) ClientNetworkProjectorAudio.mark(projector);
         });
     }
+
+    @SubscribeEvent public static void chunkUnload(ChunkEvent.Unload event) {
+        if (!(event.getChunk() instanceof LevelChunk chunk) || !chunk.getLevel().isClientSide) return;
+        ClientCableIndex.onChunkUnloaded(chunk.getLevel(), chunk.getPos());
+    }
     @SubscribeEvent public static void streamingSourceStarted(PlayStreamingSourceEvent event) {
         if (event.getSound() instanceof FilmSoundInstance film) film.onChannelStarted();
         if (event.getSound() instanceof NetworkProjectorSoundInstance network)
             network.onChannelStarted(event.getEngine(), event.getChannel());
     }
     @SubscribeEvent public static void shuttingDown(GameShuttingDownEvent event) {
+        ClientPacketHandlers.clearDownloads();
         DouyinBrowserBridge.close();
     }
     private static void clearPlayback() {
@@ -47,6 +55,7 @@ public class ClientRuntimeEvents {
         ClientFilmVideoStreams.closeAll();
         ClientNetworkProjectorAudio.stopAll();
         ClientNetworkProjectorStreams.closeAll();
+        ClientCableIndex.removeAll();
         net.minecraft.client.Minecraft.getInstance().getSoundManager().stop();
     }
 }

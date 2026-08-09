@@ -1,5 +1,8 @@
 {
   "variants": {
-    "": { "model": "createcinema:block/speaker" }
+    "facing=north": { "model": "createcinema:block/speaker" },
+    "facing=east": { "model": "createcinema:block/speaker", "y": 90 },
+    "facing=south": { "model": "createcinema:block/speaker", "y": 180 },
+    "facing=west": { "model": "createcinema:block/speaker", "y": 270 }
   }
 }

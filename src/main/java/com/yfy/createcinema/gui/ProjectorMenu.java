@@ -46,6 +46,8 @@ public class ProjectorMenu extends AbstractContainerMenu {
             if (!moveItemStackTo(stack, 2, slots.size(), true)) return ItemStack.EMPTY;
         } else if (stack.getItem() instanceof FilmItem) {
             if (!moveItemStackTo(stack, 0, 1, false)) return ItemStack.EMPTY;
+        } else if (stack.is(ModRegistry.DISPLAY_UPGRADE.get()) || stack.is(ModRegistry.REMOTE_CONTROL_UPGRADE.get())) {
+            if (!moveItemStackTo(stack, 1, 2, false)) return ItemStack.EMPTY;
         } else {
             return ItemStack.EMPTY;
         }
@@ -83,7 +85,7 @@ public class ProjectorMenu extends AbstractContainerMenu {
 
         @Override
         public boolean mayPlace(ItemStack stack) {
-            return false;
+            return stack.is(ModRegistry.DISPLAY_UPGRADE.get()) || stack.is(ModRegistry.REMOTE_CONTROL_UPGRADE.get());
         }
 
         @Override

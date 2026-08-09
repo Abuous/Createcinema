@@ -27,12 +27,34 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.util.List;
+import java.util.UUID;
 
 public class NetworkProjectorBlockEntity extends KineticBlockEntity implements Container {
     public static final int MAX_URL_LENGTH = 2048;
+    public static final int MAX_DOUYIN_CONTENT_ID_LENGTH = 32;
+
+    public enum MediaStatus {
+        IDLE,
+        LOADING,
+        PLAYING,
+        ENDED,
+        ERROR
+    }
 
     private String url = "";
     private double playTime;
+    private double mediaDurationSeconds;
+    private double mediaTimeSeconds;
+    private boolean mediaLive;
+    private MediaStatus mediaStatus = MediaStatus.IDLE;
+    private int mediaRevision;
+    private volatile UUID mediaOwner;
+    private volatile String douyinContentId = "";
+    private volatile int douyinContentRevision;
+    private volatile int douyinContentNavigationRevision = -1;
+    private volatile int douyinPlaylistIndex;
+    private volatile int douyinPlaylistCount;
+    private volatile double douyinContentStartTime;
     private final NonNullList<ItemStack> upgrades = NonNullList.withSize(2, ItemStack.EMPTY);
     private NetworkVideoQuality quality = NetworkVideoQuality.HIGH;
     private boolean wasProjecting;
@@ -86,6 +108,54 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
 
     public double getPlayTime() {
         return playTime;
+    }
+
+    public double getMediaDurationSeconds() {
+        return mediaDurationSeconds;
+    }
+
+    public double getMediaTimeSeconds() {
+        return mediaTimeSeconds;
+    }
+
+    public boolean isMediaLive() {
+        return mediaLive;
+    }
+
+    public MediaStatus getMediaStatus() {
+        return mediaStatus;
+    }
+
+    public boolean isMediaOwner(UUID playerId) {
+        return playerId != null && playerId.equals(mediaOwner);
+    }
+
+    public UUID getMediaOwner() {
+        return mediaOwner;
+    }
+
+    public String getDouyinContentId() {
+        return douyinContentId;
+    }
+
+    public int getDouyinContentRevision() {
+        return douyinContentRevision;
+    }
+
+    public int getDouyinContentNavigationRevision() {
+        return douyinContentNavigationRevision;
+    }
+
+    public int getDouyinPlaylistIndex() {
+        return douyinPlaylistIndex;
+    }
+
+    public int getDouyinPlaylistCount() {
+        return douyinPlaylistCount;
+    }
+
+    public double getDouyinContentStartTime() {
+        return douyinContentStartTime;
     }
 
     public boolean hasContinuousPlayUpgrade() {
@@ -165,17 +235,100 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         sync();
     }
 
-    public void setUrl(String value) {
+    public void setUrl(String value, UUID owner) {
         String trimmed = value.trim();
         if (trimmed.length() > MAX_URL_LENGTH) trimmed = trimmed.substring(0, MAX_URL_LENGTH);
-        if (url.equals(trimmed)) return;
+        if (url.equals(trimmed) && java.util.Objects.equals(mediaOwner, owner)) return;
         url = trimmed;
         playTime = 0.0;
+        mediaOwner = owner;
+        clearMediaInfo();
+        clearDouyinContent();
         navigationRevision = 0;
         navigationDirection = 0;
         navigationOffset = 0;
         setChanged();
         if (level != null && !level.isClientSide) sendData();
+    }
+
+    public void updateMediaInfo(UUID owner, String sourceUrl, int revision, double durationSeconds,
+                                double timeSeconds, boolean live, MediaStatus status) {
+        if (level == null || level.isClientSide || !url.equals(sourceUrl)) return;
+        boolean claimLegacyOwner = mediaOwner == null;
+        if (!claimLegacyOwner && !mediaOwner.equals(owner)) return;
+
+        double safeDuration = live ? 0.0 : sanitizeMediaSeconds(durationSeconds);
+        double safeTime = sanitizeMediaSeconds(timeSeconds);
+        if (safeDuration > 0.0) safeTime = Math.min(safeTime, safeDuration);
+        MediaStatus safeStatus = status == null ? MediaStatus.IDLE : status;
+        int safeRevision = Math.max(0, revision);
+        if (!claimLegacyOwner && mediaRevision == safeRevision && Double.compare(mediaDurationSeconds, safeDuration) == 0
+                && Double.compare(mediaTimeSeconds, safeTime) == 0 && mediaLive == live
+                && mediaStatus == safeStatus) return;
+
+        if (claimLegacyOwner) mediaOwner = owner;
+        mediaRevision = safeRevision;
+        mediaDurationSeconds = safeDuration;
+        mediaTimeSeconds = safeTime;
+        mediaLive = live;
+        mediaStatus = safeStatus;
+        sync();
+    }
+
+    public void updateDouyinContent(UUID owner, String sourceUrl, int navigationRevision, String contentId,
+                                    int playlistIndex, int playlistCount, double contentStartTime) {
+        if (level == null || level.isClientSide || !url.equals(sourceUrl) || !isMediaOwner(owner)
+                || this.navigationRevision != navigationRevision || !validDouyinContentId(contentId)) return;
+        int safeCount = Math.max(1, Math.min(playlistCount, 10_000));
+        int safeIndex = Math.max(0, Math.min(playlistIndex, safeCount - 1));
+        double safeStartTime = Math.max(Math.max(0.0, playTime - 30.0),
+                Math.min(sanitizeClockSeconds(contentStartTime), playTime + 5.0));
+        if (douyinContentId.equals(contentId) && douyinContentNavigationRevision == navigationRevision
+                && douyinPlaylistIndex == safeIndex && douyinPlaylistCount == safeCount
+                && Double.compare(douyinContentStartTime, safeStartTime) == 0) return;
+
+        douyinContentId = contentId;
+        douyinContentNavigationRevision = navigationRevision;
+        douyinPlaylistIndex = safeIndex;
+        douyinPlaylistCount = safeCount;
+        douyinContentStartTime = safeStartTime;
+        douyinContentRevision = douyinContentRevision == Integer.MAX_VALUE ? 1 : douyinContentRevision + 1;
+        sync();
+    }
+
+    private void clearMediaInfo() {
+        mediaDurationSeconds = 0.0;
+        mediaTimeSeconds = 0.0;
+        mediaLive = false;
+        mediaStatus = MediaStatus.IDLE;
+        mediaRevision = 0;
+    }
+
+    private void clearDouyinContent() {
+        douyinContentId = "";
+        douyinContentRevision = 0;
+        douyinContentNavigationRevision = -1;
+        douyinPlaylistIndex = 0;
+        douyinPlaylistCount = 0;
+        douyinContentStartTime = 0.0;
+    }
+
+    private static boolean validDouyinContentId(String contentId) {
+        if (contentId == null || contentId.isEmpty() || contentId.length() > MAX_DOUYIN_CONTENT_ID_LENGTH) return false;
+        for (int index = 0; index < contentId.length(); index++) {
+            char value = contentId.charAt(index);
+            if (value < '0' || value > '9') return false;
+        }
+        return true;
+    }
+
+    private static double sanitizeClockSeconds(double seconds) {
+        return Double.isFinite(seconds) ? Math.max(0.0, seconds) : 0.0;
+    }
+
+    private static double sanitizeMediaSeconds(double seconds) {
+        if (!Double.isFinite(seconds)) return 0.0;
+        return Math.max(0.0, Math.min(seconds, 604_800.0));
     }
 
     @Override
@@ -274,6 +427,18 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         tag.putInt("NavigationRevision", navigationRevision);
         tag.putInt("NavigationDirection", navigationDirection);
         tag.putInt("NavigationOffset", navigationOffset);
+        tag.putDouble("MediaDuration", mediaDurationSeconds);
+        tag.putDouble("MediaTime", mediaTimeSeconds);
+        tag.putBoolean("MediaLive", mediaLive);
+        tag.putString("MediaStatus", mediaStatus.name());
+        tag.putInt("MediaRevision", mediaRevision);
+        if (mediaOwner != null) tag.putUUID("MediaOwner", mediaOwner);
+        if (!douyinContentId.isEmpty()) tag.putString("DouyinContentId", douyinContentId);
+        tag.putInt("DouyinContentRevision", douyinContentRevision);
+        tag.putInt("DouyinContentNavigationRevision", douyinContentNavigationRevision);
+        tag.putInt("DouyinPlaylistIndex", douyinPlaylistIndex);
+        tag.putInt("DouyinPlaylistCount", douyinPlaylistCount);
+        tag.putDouble("DouyinContentStartTime", douyinContentStartTime);
         if (clientPacket) tag.putDouble("PlayTime", playTime);
     }
 
@@ -291,6 +456,26 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         navigationRevision = tag.getInt("NavigationRevision");
         navigationDirection = tag.getInt("NavigationDirection");
         navigationOffset = tag.getInt("NavigationOffset");
+        mediaDurationSeconds = sanitizeMediaSeconds(tag.getDouble("MediaDuration"));
+        mediaTimeSeconds = sanitizeMediaSeconds(tag.getDouble("MediaTime"));
+        mediaLive = tag.getBoolean("MediaLive");
+        try {
+            mediaStatus = MediaStatus.valueOf(tag.getString("MediaStatus"));
+        } catch (IllegalArgumentException ignored) {
+            mediaStatus = MediaStatus.IDLE;
+        }
+        mediaRevision = Math.max(0, tag.getInt("MediaRevision"));
+        mediaOwner = tag.hasUUID("MediaOwner") ? tag.getUUID("MediaOwner") : null;
+        douyinContentId = tag.getString("DouyinContentId");
+        if (!douyinContentId.isEmpty() && !validDouyinContentId(douyinContentId)) douyinContentId = "";
+        douyinContentRevision = Math.max(0, tag.getInt("DouyinContentRevision"));
+        douyinContentNavigationRevision = tag.contains("DouyinContentNavigationRevision")
+                ? tag.getInt("DouyinContentNavigationRevision") : -1;
+        douyinPlaylistCount = Math.max(0, Math.min(tag.getInt("DouyinPlaylistCount"), 10_000));
+        douyinPlaylistIndex = douyinPlaylistCount == 0 ? 0
+                : Math.max(0, Math.min(tag.getInt("DouyinPlaylistIndex"), douyinPlaylistCount - 1));
+        douyinContentStartTime = clientPacket
+                ? sanitizeClockSeconds(tag.getDouble("DouyinContentStartTime")) : 0.0;
         playTime = clientPacket && tag.contains("PlayTime") ? tag.getDouble("PlayTime") : 0.0;
     }
 

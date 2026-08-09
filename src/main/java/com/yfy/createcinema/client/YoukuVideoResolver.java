@@ -1,7 +1,10 @@
 package com.yfy.createcinema.client;
 
+import com.yfy.createcinema.NetworkVideoQuality;
+
 import java.io.IOException;
 import java.net.URI;
+import java.util.List;
 
 final class YoukuVideoResolver {
     private YoukuVideoResolver() {
@@ -16,8 +19,12 @@ final class YoukuVideoResolver {
         }
     }
 
-    static IOException unsupported(IOException cause) {
-        return new IOException("Youku did not expose a directly playable m3u8/mp4 stream. "
-                + "The page metadata for this video is not free-to-access and the playback API is signed/browser-bound.", cause);
+    static BilibiliResolver.ResolvedMedia resolve(String input, NetworkVideoQuality quality) throws IOException {
+        throw new IOException("Youku uses DRM encryption; video stream is unavailable");
+    }
+
+    static BilibiliResolver.ResolvedPlaylist discoverPlaylist(String input) {
+        return new BilibiliResolver.ResolvedPlaylist(
+                List.of(new BilibiliResolver.PlaylistEntry(input, "Youku")), 0);
     }
 }

@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 
 final class VideoResolverHttp {
     static final HttpClient HTTP = HttpClient.newBuilder()
@@ -34,11 +35,45 @@ final class VideoResolverHttp {
     }
 
     static String getText(String url, String referer) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10))
-                .header("User-Agent", BilibiliResolver.USER_AGENT).header("Referer", referer).GET().build();
+        return getText(url, referer, null);
+    }
+
+    static String getText(String url, String referer, Map<String, String> additionalHeaders)
+            throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(10))
+                .header("User-Agent", BilibiliResolver.USER_AGENT).header("Referer", referer);
+        if (additionalHeaders != null) additionalHeaders.forEach(builder::header);
+        HttpRequest request = builder.GET().build();
         HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2) throw new IOException("HTTP " + response.statusCode());
         return response.body();
+    }
+
+    static byte[] getBytes(String url, String referer) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15))
+                .header("User-Agent", BilibiliResolver.USER_AGENT).header("Referer", referer)
+                .GET().build();
+        HttpResponse<byte[]> response = HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() / 100 != 2) throw new IOException("HTTP " + response.statusCode());
+        return response.body();
+    }
+
+    record SnapshotProbe(String etag, String lastModified) {
+        boolean changedFrom(String etag, String lastModified) {
+            if (this.etag != null && !this.etag.equals(etag)) return true;
+            if (this.etag != null) return false;
+            return this.lastModified != null && !this.lastModified.equals(lastModified);
+        }
+    }
+
+    static SnapshotProbe probe(String url, String referer) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15))
+                .header("User-Agent", BilibiliResolver.USER_AGENT).header("Referer", referer)
+                .header("Range", "bytes=0-0").GET().build();
+        HttpResponse<byte[]> response = HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() / 100 != 2) throw new IOException("HTTP " + response.statusCode());
+        return new SnapshotProbe(response.headers().firstValue("ETag").orElse(null),
+                response.headers().firstValue("Last-Modified").orElse(null));
     }
 
     static String urlEncode(String value) {

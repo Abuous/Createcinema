@@ -91,6 +91,11 @@ public class ClientFilmCache {
         });
     }
 
+    public static void restore(String filmId) {
+        DELETED.remove(filmId);
+        invalidate(filmId);
+    }
+
     public static FilmMetadata metadata(String filmId) {
         if (filmId.isBlank() || isDeleted(filmId)) return null;
         FilmMetadata cached = METADATA.get(filmId);
@@ -122,11 +127,12 @@ public class ClientFilmCache {
         }
         try (InputStream in = Files.newInputStream(frame)) {
             NativeImage image = readJpeg(in);
-            if (cached == null) {
+            if (cached == null || cached.width != image.getWidth() || cached.height != image.getHeight()) {
+                if (cached != null) Minecraft.getInstance().getTextureManager().release(cached.location);
                 ResourceLocation location = ResourceLocation.fromNamespaceAndPath(CreateCinema.MODID, "film/" + filmId.replace('-', '_'));
                 DynamicTexture texture = new DynamicTexture(image);
                 Minecraft.getInstance().getTextureManager().register(location, texture);
-                FRAME_TEXTURES.put(filmId, new FrameTexture(location, texture, frameIndex));
+                FRAME_TEXTURES.put(filmId, new FrameTexture(location, texture, frameIndex, image.getWidth(), image.getHeight()));
                 return location;
             }
             cached.texture.setPixels(image);
@@ -226,11 +232,15 @@ public class ClientFilmCache {
         private final ResourceLocation location;
         private final DynamicTexture texture;
         private int frameIndex;
+        private final int width;
+        private final int height;
 
-        private FrameTexture(ResourceLocation location, DynamicTexture texture, int frameIndex) {
+        private FrameTexture(ResourceLocation location, DynamicTexture texture, int frameIndex, int width, int height) {
             this.location = location;
             this.texture = texture;
             this.frameIndex = frameIndex;
+            this.width = width;
+            this.height = height;
         }
     }
 }
