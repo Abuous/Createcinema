@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=south": { "model": "createcinema:block/white_screen" },
+    "facing=west": { "model": "createcinema:block/white_screen", "y": 90 },
+    "facing=north": { "model": "createcinema:block/white_screen", "y": 180 },
+    "facing=east": { "model": "createcinema:block/white_screen", "y": 270 }
+  }
+}

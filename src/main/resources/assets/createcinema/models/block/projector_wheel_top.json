@@ -1,0 +1,10 @@
+{
+  "loader": "createcinema:bedrock",
+  "render_type": "minecraft:cutout",
+  "source": "createcinema:bedrock/block/projector_wheel_top.json",
+  "bones": ["bone2"],
+  "textures": {
+    "texture": "createcinema:block/projector",
+    "particle": "createcinema:block/projector"
+  }
+}

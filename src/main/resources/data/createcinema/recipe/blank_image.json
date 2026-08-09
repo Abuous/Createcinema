@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["PPP", "PIP", "PPP"],
+  "key": {
+    "P": { "item": "minecraft:paper" },
+    "I": { "item": "minecraft:iron_nugget" }
+  },
+  "result": { "id": "createcinema:blank_image", "count": 1 }
+}

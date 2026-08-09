@@ -1,0 +1,8 @@
+{
+  "loader": "createcinema:bedrock",
+  "source": "createcinema:bedrock/block/white_screen.json",
+  "textures": {
+    "texture": "createcinema:block/white_screen",
+    "particle": "createcinema:block/white_screen"
+  }
+}

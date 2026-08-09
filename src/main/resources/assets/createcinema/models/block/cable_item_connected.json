@@ -1,0 +1,20 @@
+{
+  "textures": {
+    "cable": "minecraft:block/gray_concrete",
+    "particle": "minecraft:block/gray_concrete"
+  },
+  "elements": [
+    {
+      "from": [6, 6, 1],
+      "to": [10, 10, 15],
+      "faces": {
+        "down": { "texture": "#cable" },
+        "up": { "texture": "#cable" },
+        "north": { "texture": "#cable" },
+        "south": { "texture": "#cable" },
+        "west": { "texture": "#cable" },
+        "east": { "texture": "#cable" }
+      }
+    }
+  ]
+}

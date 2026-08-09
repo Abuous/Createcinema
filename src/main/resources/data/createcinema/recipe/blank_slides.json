@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["PPP", "GIG", "PPP"],
+  "key": {
+    "P": { "item": "minecraft:paper" },
+    "G": { "item": "minecraft:glass_pane" },
+    "I": { "item": "minecraft:iron_nugget" }
+  },
+  "result": { "id": "createcinema:blank_slides", "count": 1 }
+}
