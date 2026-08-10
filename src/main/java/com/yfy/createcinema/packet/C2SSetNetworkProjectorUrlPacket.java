@@ -28,7 +28,11 @@ public record C2SSetNetworkProjectorUrlPacket(BlockPos projectorPos, String url)
         });
     }
     private static boolean isValidWebUrl(String value) {
-        try { URI uri = URI.create(value); return (uri.getScheme().equalsIgnoreCase("http") || uri.getScheme().equalsIgnoreCase("https")) && uri.getHost() != null && uri.getUserInfo() == null; }
-        catch (IllegalArgumentException e) { return false; }
+        try {
+            URI uri = URI.create(value);
+            String scheme = uri.getScheme();
+            return (scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")))
+                    && uri.getHost() != null && uri.getUserInfo() == null;
+        } catch (IllegalArgumentException e) { return false; }
     }
 }

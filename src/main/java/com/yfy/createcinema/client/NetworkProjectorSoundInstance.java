@@ -53,10 +53,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
     private volatile AudioStream audioStream;
     private volatile ChannelAccess.ChannelHandle channelHandle;
     private volatile boolean channelStarted;
-    private volatile long channelStartedNanos;
-    private boolean audioClockStarted;
-    private double expectedTime;
-    private long audioClockNanos;
     private int driftTicks;
     private int freezeTicks;
     private double prevLatestPlayTime = Double.NaN;
@@ -165,6 +161,7 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         }
         prevLatestPlayTime = latestPlayTime;
         pitch = playbackRate(projector, sourceMedia);
+        if (sharedAudio != null) sharedAudio.setTargetRate(pitch);
         volume = SpeakerBlock.redstoneVolume(projector.getLevel(), anchor);
         if (sharedAudio != null && sharedAudio.failure() != null) {
             openFailed = true;
@@ -186,32 +183,16 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
             return;
         }
         if (Double.isNaN(streamStartTime) || !channelStarted) return;
-        if (!audioClockStarted) {
-            audioClockStarted = true;
-            expectedTime = streamStartTime;
-            audioClockNanos = channelStartedNanos > 0L ? channelStartedNanos : System.nanoTime();
-            double startupDrift = circularDistance(expectedTime, latestPlayTime, sourceMedia.durationSeconds());
-            CreateCinema.LOGGER.debug("Aligned network audio {} at {}s with {}s startup drift", url,
-                    String.format(java.util.Locale.ROOT, "%.3f", streamStartTime),
-                    String.format(java.util.Locale.ROOT, "%.3f", startupDrift));
-            return;
-        }
-        long now = System.nanoTime();
-        double elapsed = Math.max(0.0, (now - audioClockNanos) / 1_000_000_000.0);
-        expectedTime = wrap(expectedTime + elapsed * pitch, sourceMedia.durationSeconds());
-        audioClockNanos = now;
-        if (sourceMedia.live()) return;
-        double drift = circularDistance(expectedTime, latestPlayTime, sourceMedia.durationSeconds());
+        double drift = sharedAudio == null ? Double.NaN : sharedAudio.audioLag();
+        if (Double.isNaN(drift) || sourceMedia.live()) return;
         if (freezeTicks >= RESYNC_CONFIRM_TICKS) {
             driftTicks = 0;
         } else {
-            driftTicks = drift > RESYNC_THRESHOLD_SECONDS ? driftTicks + 1 : 0;
+            driftTicks = Math.abs(drift) > RESYNC_THRESHOLD_SECONDS ? driftTicks + 1 : 0;
         }
         if (driftTicks >= RESYNC_CONFIRM_TICKS) {
-            CreateCinema.LOGGER.debug("Restarting network audio {} after {}s playback drift (audio {}s, video {}s)", url,
-                    String.format(java.util.Locale.ROOT, "%.3f", drift),
-                    String.format(java.util.Locale.ROOT, "%.3f", expectedTime),
-                    String.format(java.util.Locale.ROOT, "%.3f", latestPlayTime));
+            CreateCinema.LOGGER.debug("Restarting network audio {} after {}s playback drift vs video clock", url,
+                    String.format(java.util.Locale.ROOT, "%.3f", drift));
             driftRestart = true;
             stopInstance();
         }
@@ -278,7 +259,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
             CreateCinema.LOGGER.debug("Stopped late network audio channel for {}", url);
             return;
         }
-        channelStartedNanos = System.nanoTime();
         channelStarted = true;
         CreateCinema.LOGGER.debug("Started network audio {} at {}s", url,
                 String.format(java.util.Locale.ROOT, "%.3f", streamStartTime));
@@ -308,11 +288,6 @@ public class NetworkProjectorSoundInstance extends AbstractSoundInstance impleme
         if (duration <= 0.0) return value;
         double wrapped = value % duration;
         return wrapped < 0.0 ? wrapped + duration : wrapped;
-    }
-
-    private static double circularDistance(double first, double second, double duration) {
-        double distance = Math.abs(first - second);
-        return duration <= 0.0 ? distance : Math.min(distance, duration - distance);
     }
 
     private static ResourceLocation soundLocation(BlockPos projector, String clusterId) {

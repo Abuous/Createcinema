@@ -1,4 +1,5 @@
 {
+  "render_type": "minecraft:cutout",
   "textures": { "cable": "createcinema:block/cable", "particle": "createcinema:block/cable" },
   "elements": [
     { "from": [6, 6, 6], "to": [10, 10, 10], "faces": {

@@ -1,5 +1,6 @@
 package com.yfy.createcinema.client;
 
+import com.yfy.createcinema.CreateCinema;
 import net.minecraft.client.sounds.AudioStream;
 
 import javax.sound.sampled.AudioFormat;
@@ -25,12 +26,15 @@ final class SharedNetworkAudio implements AutoCloseable {
 
     private final BilibiliResolver.ResolvedMedia source;
     private final DoubleSupplier startSeconds;
+    private final boolean live;
     private final Set<Tap> taps = ConcurrentHashMap.newKeySet();
     private volatile NetworkFfmpegAudioStream upstream;
     private volatile AudioFormat format;
     private volatile int chunkBytes;
     private volatile int bytesPerSecond;
     private volatile double pumpedSeconds;
+    private volatile double audioLag;
+    private volatile float targetRate = 1.0f;
     private volatile Throwable failure;
     private volatile boolean closed;
     private volatile boolean pumpStarted;
@@ -38,6 +42,7 @@ final class SharedNetworkAudio implements AutoCloseable {
     SharedNetworkAudio(BilibiliResolver.ResolvedMedia source, DoubleSupplier startSeconds) {
         this.source = source;
         this.startSeconds = startSeconds;
+        live = source.live();
     }
 
     synchronized Tap openTap() throws IOException {
@@ -65,6 +70,15 @@ final class SharedNetworkAudio implements AutoCloseable {
         return failure;
     }
 
+    /** Audio playback lag vs the video clock, in media seconds. Positive means audio is ahead. */
+    double audioLag() {
+        return audioLag;
+    }
+
+    void setTargetRate(float rate) {
+        if (!live) targetRate = Math.max(1.0f, rate);
+    }
+
     private void openUpstream() throws IOException {
         NetworkFfmpegAudioStream opened = new NetworkFfmpegAudioStream(source, startSeconds);
         if (closed) {
@@ -88,19 +102,21 @@ final class SharedNetworkAudio implements AutoCloseable {
                     continue;
                 }
                 ByteBuffer pcm = upstream.readDecoded(chunkBytes, PRODUCER_WAIT_MILLIS);
+                double videoNow = startSeconds.getAsDouble();
                 if (!pcm.hasRemaining()) {
                     if (upstream.decoderEnded()) throw new IOException("Shared network audio decoder ended");
                     if (System.currentTimeMillis() - lastProduced > STALL_TIMEOUT_MILLIS) {
                         throw new IOException("Shared network audio upstream stalled");
                     }
+                    audioLag = pumpedSeconds - videoNow;
                     continue;
                 }
                 lastProduced = System.currentTimeMillis();
-                byte[] copy = new byte[pcm.remaining()];
-                pcm.get(copy);
+                byte[] copy = keepBytes(pcm);
                 double chunkStartSeconds = pumpedSeconds;
                 for (Tap tap : taps) tap.offer(copy, chunkStartSeconds);
-                pumpedSeconds = chunkStartSeconds + pcm.remaining() / (double) Math.max(1, bytesPerSecond);
+                pumpedSeconds = chunkStartSeconds + copy.length / (double) Math.max(1, bytesPerSecond);
+                audioLag = pumpedSeconds - videoNow;
                 pace();
             }
         } catch (Throwable error) {
@@ -121,6 +137,29 @@ final class SharedNetworkAudio implements AutoCloseable {
             }
         }
         if (closed) throw new IOException("Shared network audio is closed");
+    }
+
+    /** Trims a decoded chunk to the head fraction matching the playback rate, so consumers at
+     *  pitch > 1 are fed enough media to stay continuous. */
+    private byte[] keepBytes(ByteBuffer pcm) {
+        int bytes = pcm.remaining();
+        float rate = Math.max(1.0f, targetRate);
+        int keep = bytes;
+        if (rate > 1.01f) {
+            int frameSize = Math.max(1, format == null ? 2 : format.getFrameSize());
+            int head = (int) (bytes / rate);
+            keep = Math.max(frameSize, head - head % frameSize);
+        }
+        byte[] copy = new byte[keep];
+        int oldLimit = pcm.limit();
+        pcm.limit(pcm.position() + keep);
+        pcm.get(copy);
+        pcm.limit(oldLimit);
+        if (keep < bytes) {
+            CreateCinema.LOGGER.debug("Trimmed shared network audio chunk {} -> {} bytes for {}x playback",
+                    bytes, keep, rate);
+        }
+        return copy;
     }
 
     private void pace() {

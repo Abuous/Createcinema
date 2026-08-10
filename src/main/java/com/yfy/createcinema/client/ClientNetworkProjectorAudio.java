@@ -147,7 +147,7 @@ public final class ClientNetworkProjectorAudio {
             }
             active.clusters.values().forEach(existing -> stopSound(minecraft, existing.sound));
             active.clusters.clear();
-            active.powered.clear();
+            active.powered = Set.of();
             closeShared(active);
             return;
         }
@@ -207,7 +207,7 @@ public final class ClientNetworkProjectorAudio {
             if (speakers.isEmpty()) {
                 active.clusters.values().forEach(existing -> stopSound(minecraft, existing.sound));
                 active.clusters.clear();
-                active.powered.clear();
+                active.powered = Set.of();
                 closeShared(active);
                 continue;
             }

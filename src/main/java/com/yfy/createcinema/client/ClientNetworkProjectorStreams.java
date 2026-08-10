@@ -63,8 +63,8 @@ public final class ClientNetworkProjectorStreams {
     private static final double DISPLAY_LEAD_SECONDS = 0.035;
     private static final long LIVE_STOP_GRACE_MILLIS = 1_000L;
     private static final long DECODE_RESUBMIT_MILLIS = 2_000L;
-    private static final long DECODE_STALL_MILLIS = 30_000L;
-    private static final long STALL_RESUME_TTL_MILLIS = 60_000L;
+    private static final long DECODE_STALL_MILLIS = 15_000L;
+    private static final long STALL_RESUME_TTL_MILLIS = 300_000L;
     private static final String NETWORK_RW_TIMEOUT_MICROS = "5000000";
     private static final Map<String, Session> SESSIONS = new HashMap<>();
     private static final Map<String, StallResume> STALL_RESUMES = new HashMap<>();
@@ -102,6 +102,13 @@ public final class ClientNetworkProjectorStreams {
             }
             StallResume resume = stallResume(key, projector.getUrl());
             double startPlayTime = resume == null ? playTime : resume.seconds();
+            if (resume != null) {
+                CreateCinema.LOGGER.info("Resuming network stream {} at breakpoint {}", projector.getUrl(),
+                        formatSeconds(resume.seconds()));
+            } else {
+                CreateCinema.LOGGER.debug("Starting network stream {} from {}", projector.getUrl(),
+                        formatSeconds(Math.max(0.0, playTime)));
+            }
             session = new Session(key, projector, projector.getUrl(), continuousEnabled, quality, startPlayTime,
                     projector.getNavigationRevision(), projector.getNavigationOffset(), -1, 0);
             session.stallResume = resume != null;
@@ -595,8 +602,16 @@ public final class ClientNetworkProjectorStreams {
                             : hls ? HlsStreamCache.duration(source.videoUrl())
                             : grabber.getLengthInTime() / 1_000_000.0;
                     double startTime = wrap(playbackTime(), duration);
-                    if (!source.live() && !hls && duration > 0.0) {
-                        grabber.setTimestamp((long) (startTime * 1_000_000.0));
+                    if (!source.live() && !hls) {
+                        if (duration > 0.0) {
+                            grabber.setTimestamp((long) (startTime * 1_000_000.0));
+                        } else if (startTime > 0.25) {
+                            try {
+                                grabber.setTimestamp((long) (startTime * 1_000_000.0));
+                            } catch (Exception ignored) {
+                                CreateCinema.LOGGER.debug("Stream seek not supported for {}, falling back to start", url);
+                            }
+                        }
                     }
                     long containerStartMicros = grabber.getFormatContext().start_time();
                     double timestampOrigin = source.live() || hls || containerStartMicros == AV_NOPTS_VALUE ? Double.NaN
@@ -688,6 +703,7 @@ public final class ClientNetworkProjectorStreams {
                 }
             } catch (Throwable error) {
                 if (!closed) {
+                    recordStallResume();
                     progress = 0.0f;
                     failed = true;
                     videoReadyForAudio = false;

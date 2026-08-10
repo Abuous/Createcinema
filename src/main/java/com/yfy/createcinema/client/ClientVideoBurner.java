@@ -1228,12 +1228,12 @@ public class ClientVideoBurner {
             int channels = grabber.getAudioChannels();
             if (channels <= 0) return false;
             int sampleRate = grabber.getSampleRate() > 0 ? grabber.getSampleRate() : 48_000;
-            boolean vorbis = supportsVorbis(channels, sampleRate);
+            String audioCodec = pickAudioCodec(channels, sampleRate);
             try (FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(output.toFile(), channels)) {
                 recorder.setFormat("ogg");
-                recorder.setAudioCodec(vorbis ? org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_VORBIS
+                recorder.setAudioCodec("libvorbis".equals(audioCodec) ? org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_VORBIS
                         : org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_FLAC);
-                if (vorbis) {
+                if ("libvorbis".equals(audioCodec)) {
                     recorder.setAudioOption("strict", "experimental");
                     recorder.setAudioBitrate(quality.audioBitrate());
                 }
@@ -1242,11 +1242,11 @@ public class ClientVideoBurner {
                 try {
                     recorder.start();
                 } catch (Exception error) {
-                    throw new AudioTranscodeException("Could not open " + (vorbis ? "Vorbis" : "FLAC")
+                    throw new AudioTranscodeException("Could not open " + ("libvorbis".equals(audioCodec) ? "Vorbis" : "FLAC")
                             + " encoder for " + channels + " channels at " + sampleRate + " Hz", error);
                 }
                 CreateCinema.LOGGER.info("Encoding film audio as {} ({} channels, {} Hz)",
-                        vorbis ? "Vorbis" : "FLAC", channels, sampleRate);
+                        "libvorbis".equals(audioCodec) ? "Vorbis" : "FLAC", channels, sampleRate);
                 Frame frame;
                 try {
                     while ((frame = grabber.grabSamples()) != null) {
@@ -1267,6 +1267,21 @@ public class ClientVideoBurner {
             grabber.stop();
         }
         return Files.isRegularFile(output) && Files.size(output) > 0;
+    }
+
+    private static final List<String> AUDIO_ENCODER_CANDIDATES = List.of("libvorbis", "flac");
+
+    private static String pickAudioCodec(int channels, int sampleRate) {
+        List<String> available = new ArrayList<>();
+        for (String name : AUDIO_ENCODER_CANDIDATES) {
+            var codec = org.bytedeco.ffmpeg.global.avcodec.avcodec_find_encoder_by_name(name);
+            if (codec != null && !codec.isNull()) available.add(name);
+        }
+        CreateCinema.LOGGER.info("Audio encoder candidates: {}", available);
+        if (available.contains("libvorbis") && supportsVorbis(channels, sampleRate)) return "libvorbis";
+        if (available.contains("flac")) return "flac";
+        throw new IllegalStateException(
+                "No supported audio encoder available (candidates: " + available + ", required: libvorbis or flac)");
     }
 
     private static boolean supportsVorbis(int channels, int sampleRate) {

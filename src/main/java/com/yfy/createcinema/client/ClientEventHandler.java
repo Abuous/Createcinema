@@ -17,7 +17,6 @@ import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 public class ClientEventHandler {
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
-        CinemaPartialModels.init();
         event.enqueueWork(() -> {
             com.yfy.createcinema.ClientConfig.clearLegacyDouyinCookie();
             com.yfy.createcinema.ClientConfig.setBrowserShutdown(provider ->

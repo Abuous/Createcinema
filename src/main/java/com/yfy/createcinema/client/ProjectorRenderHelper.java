@@ -1,7 +1,6 @@
 package com.yfy.createcinema.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Axis;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
@@ -32,24 +31,6 @@ public final class ProjectorRenderHelper {
                 .uncenter()
                 .translate(rear.getStepX() * SHAFT_EXPOSURE, 0.0f, rear.getStepZ() * SHAFT_EXPOSURE);
         KineticBlockEntityRenderer.kineticRotationTransform(shaft, be, axis, angle, packedLight)
-                .renderInto(poseStack, buffers.getBuffer(RenderType.cutout()));
-    }
-
-    // 渲染一个侧面的轮子
-    public static void renderWheel(KineticBlockEntity be, Direction facing,
-                                   dev.engine_room.flywheel.lib.model.baked.PartialModel wheel,
-                                   float pivotX, float pivotY, float pivotZ,
-                                   float wheelSideOffset,
-                                   PoseStack poseStack, MultiBufferSource buffers, int packedLight) {
-        float angle = KineticBlockEntityRenderer.getAngleForBe(be, be.getBlockPos(), facing.getAxis());
-
-        SuperByteBuffer buffer = CachedBuffers.partial(wheel, be.getBlockState()).reset();
-        buffer.center()
-                .rotateYDegrees(AngleHelper.horizontalAngle(facing))
-                .uncenter()
-                .translate(-wheelSideOffset, 0.0f, 0.0f)
-                .rotateAround(Axis.XP.rotation(angle), pivotX, pivotY, pivotZ)
-                .light(packedLight)
                 .renderInto(poseStack, buffers.getBuffer(RenderType.cutout()));
     }
 

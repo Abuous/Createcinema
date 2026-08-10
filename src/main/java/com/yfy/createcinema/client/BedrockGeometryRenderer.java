@@ -46,6 +46,8 @@ final class BedrockGeometryRenderer {
     static final ResourceLocation PROJECTOR = id("bedrock/block/projector.json");
     static final ResourceLocation NETWORK_PROJECTOR = id("bedrock/block/network_projector.json");
     static final ResourceLocation BURNER = id("bedrock/block/burner.json");
+    static final ResourceLocation PROJECTOR_WHEEL_TOP = id("bedrock/block/projector_wheel_top.json");
+    static final ResourceLocation PROJECTOR_WHEEL_BOTTOM = id("bedrock/block/projector_wheel_bottom.json");
     static final ResourceLocation PROJECTOR_TEXTURE = id("textures/block/projector.png");
     static final ResourceLocation NETWORK_PROJECTOR_TEXTURE = id("textures/block/network_projector.png");
     static final ResourceLocation BURNER_TEXTURE = id("textures/block/burner.png");
@@ -65,6 +67,44 @@ final class BedrockGeometryRenderer {
         rotateToFacing(poseStack, facing);
         for (Bone bone : geometry.roots) renderBone(geometry, bone, seconds, powered, poseStack, vertices, packedLight);
         poseStack.popPose();
+    }
+
+    static void renderWheel(ResourceLocation model, String boneName, float angleRadians, Direction facing,
+                            PoseStack poseStack, MultiBufferSource buffers, int packedLight) {
+        Geometry geometry = geometry(model);
+        if (geometry == null) return;
+        Bone bone = findBone(geometry.roots, boneName);
+        if (bone == null) {
+            CreateCinema.LOGGER.warn("Bedrock wheel bone {} not found in {}", boneName, model);
+            return;
+        }
+        VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutoutNoCull(PROJECTOR_TEXTURE));
+        poseStack.pushPose();
+        rotateToFacing(poseStack, facing);
+        renderWheelBone(geometry, bone, angleRadians, poseStack, vertices, packedLight);
+        poseStack.popPose();
+    }
+
+    private static void renderWheelBone(Geometry geometry, Bone bone, float angleRadians, PoseStack poseStack,
+                                        VertexConsumer vertices, int packedLight) {
+        poseStack.pushPose();
+        if (angleRadians != 0.0f) {
+            poseStack.translate(bone.pivot[0] / 16.0f + 0.5f, bone.pivot[1] / 16.0f, bone.pivot[2] / 16.0f + 0.5f);
+            poseStack.mulPose(Axis.XP.rotation(angleRadians));
+            poseStack.translate(-bone.pivot[0] / 16.0f - 0.5f, -bone.pivot[1] / 16.0f, -bone.pivot[2] / 16.0f - 0.5f);
+        }
+        for (Cube cube : bone.cubes) renderCube(cube, geometry.textureWidth, geometry.textureHeight, poseStack, vertices, packedLight);
+        for (Bone child : bone.children) renderWheelBone(geometry, child, angleRadians, poseStack, vertices, packedLight);
+        poseStack.popPose();
+    }
+
+    private static Bone findBone(List<Bone> bones, String name) {
+        for (Bone bone : bones) {
+            if (name.equals(bone.name)) return bone;
+            Bone found = findBone(bone.children, name);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     static void bakeStatic(ResourceLocation model, Set<String> includedBones, IGeometryBakingContext context,
