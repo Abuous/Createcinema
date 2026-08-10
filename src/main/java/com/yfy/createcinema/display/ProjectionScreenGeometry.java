@@ -12,6 +12,17 @@ public final class ProjectionScreenGeometry {
     }
 
     public static ScreenMatrix find(Level level, BlockPos projector, Direction facing) {
+        BlockPos anchor = findAnchor(level, projector, facing);
+        if (anchor == null) return new ScreenMatrix(1, 1);
+        Direction horizontal = facing.getClockWise();
+        return expand(level, anchor, horizontal);
+    }
+
+    public static boolean hasAnyScreen(Level level, BlockPos projector, Direction facing) {
+        return findAnchor(level, projector, facing) != null;
+    }
+
+    private static BlockPos findAnchor(Level level, BlockPos projector, Direction facing) {
         Direction horizontal = facing.getClockWise();
         int anchorRadius = ClientConfig.screenAnchorRadius();
         for (int distance = 1; distance <= ClientConfig.screenMaxDistance(); distance++) {
@@ -28,9 +39,9 @@ public final class ProjectionScreenGeometry {
                     }
                 }
             }
-            if (anchor != null) return expand(level, anchor, horizontal);
+            if (anchor != null) return anchor;
         }
-        return new ScreenMatrix(1, 1);
+        return null;
     }
 
     private static ScreenMatrix expand(Level level, BlockPos anchor, Direction horizontal) {

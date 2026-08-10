@@ -64,8 +64,10 @@ public final class ClientNetworkProjectorStreams {
     private static final long LIVE_STOP_GRACE_MILLIS = 1_000L;
     private static final long DECODE_RESUBMIT_MILLIS = 2_000L;
     private static final long DECODE_STALL_MILLIS = 30_000L;
+    private static final long STALL_RESUME_TTL_MILLIS = 60_000L;
     private static final String NETWORK_RW_TIMEOUT_MICROS = "5000000";
     private static final Map<String, Session> SESSIONS = new HashMap<>();
+    private static final Map<String, StallResume> STALL_RESUMES = new HashMap<>();
     private static final AtomicInteger NEXT_MEDIA_REVISION = new AtomicInteger();
     private static final ExecutorService STREAM_EXECUTOR = new ThreadPoolExecutor(4, 4, 30L, TimeUnit.SECONDS,
             new ArrayBlockingQueue<>(16), runnable -> {
@@ -98,8 +100,12 @@ public final class ClientNetworkProjectorStreams {
                 }
                 session.close("projector settings changed");
             }
-            session = new Session(key, projector, projector.getUrl(), continuousEnabled, quality, playTime,
+            StallResume resume = stallResume(key, projector.getUrl());
+            double startPlayTime = resume == null ? playTime : resume.seconds();
+            session = new Session(key, projector, projector.getUrl(), continuousEnabled, quality, startPlayTime,
                     projector.getNavigationRevision(), projector.getNavigationOffset(), -1, 0);
+            session.stallResume = resume != null;
+            session.resumeSeconds = resume == null ? Double.NaN : resume.seconds();
             SESSIONS.put(key, session);
         } else if (session.navigationRevision != projector.getNavigationRevision()
                 && (session.continuousPlaylist() || session.sharedDouyinSource)) {
@@ -212,7 +218,23 @@ public final class ClientNetworkProjectorStreams {
                 ? Component.translatable("gui.createcinema.stream.error_short")
                 : session.errorMessage;
         if (session.ended) return Component.translatable("gui.createcinema.stream.ended");
+        if (session.stallResume && !session.bufferReady) {
+            return Component.translatable("gui.createcinema.stream.recovering",
+                    formatSeconds(session.resumeSeconds));
+        }
         return Component.translatable("gui.createcinema.stream.loading_progress", Math.round(session.progress * 100.0f));
+    }
+
+    private static StallResume stallResume(String key, String url) {
+        StallResume resume = STALL_RESUMES.get(key);
+        if (resume == null || !resume.url().equals(url)) return null;
+        return resume;
+    }
+
+    private static String formatSeconds(double seconds) {
+        if (Double.isNaN(seconds) || seconds < 0.0) seconds = 0.0;
+        int total = (int) Math.floor(seconds);
+        return String.format(java.util.Locale.ROOT, "%d:%02d", total / 60, total % 60);
     }
 
     public static Component playlistMessage(BlockPos pos) {
@@ -253,6 +275,7 @@ public final class ClientNetworkProjectorStreams {
     public static void stop(NetworkProjectorBlockEntity projector) {
         if (projector.getLevel() == null) return;
         String key = sessionKey(projector);
+        STALL_RESUMES.remove(key);
         Session session = SESSIONS.get(key);
         if (session != null && session.retainWhileUnpowered(projector)) return;
         session = SESSIONS.remove(key);
@@ -262,6 +285,7 @@ public final class ClientNetworkProjectorStreams {
     public static void tick() {
         long now = System.currentTimeMillis();
         long cutoff = now - 60_000L;
+        STALL_RESUMES.entrySet().removeIf(entry -> now - entry.getValue().recordedAt() > STALL_RESUME_TTL_MILLIS);
         SESSIONS.entrySet().removeIf(entry -> {
             if (entry.getValue().projectorInvalid()) {
                 entry.getValue().close("projector state changed");
@@ -301,6 +325,7 @@ public final class ClientNetworkProjectorStreams {
                         || IqiyiVideoResolver.canResolve(session.url));
         SESSIONS.values().forEach(session -> session.close("client level cleared"));
         SESSIONS.clear();
+        STALL_RESUMES.clear();
         HlsStreamCache.clear();
         if (hadBrowserSession) DouyinBrowserBridge.cancelPendingCapture();
     }
@@ -331,6 +356,8 @@ public final class ClientNetworkProjectorStreams {
         private volatile boolean decodeResubmitPending;
         private volatile long lastDecodeHeartbeat = System.currentTimeMillis();
         private volatile float progress = 0.03f;
+        private volatile boolean stallResume;
+        private volatile double resumeSeconds = Double.NaN;
         private volatile Component errorMessage;
         private volatile boolean bufferReady;
         private DynamicTexture texture;
@@ -759,10 +786,24 @@ public final class ClientNetworkProjectorStreams {
 
         private boolean stalled(long now) {
             if (closed || failed || ended || lastDecodeHeartbeat >= now - DECODE_STALL_MILLIS) return false;
+            recordStallResume();
             close("decode stalled");
-            CreateCinema.LOGGER.warn("Network stream session {} stalled for {} ms, dropping it", url,
+            CreateCinema.LOGGER.warn("Network stream session {} stalled for {} ms, will resume at breakpoint", url,
                     now - lastDecodeHeartbeat);
             return true;
+        }
+
+        private void recordStallResume() {
+            if (source == null || source.live()) return;
+            double breakpoint;
+            synchronized (bufferedFrames) {
+                if (!bufferedFrames.isEmpty()) {
+                    breakpoint = bufferedFrames.getLast().timestamp;
+                } else {
+                    breakpoint = playbackTime();
+                }
+            }
+            STALL_RESUMES.put(key, new StallResume(url, wrap(breakpoint, duration), System.currentTimeMillis()));
         }
 
         private void submitDecode() {
@@ -981,6 +1022,11 @@ public final class ClientNetworkProjectorStreams {
                 height = frame.height;
                 uploadedFrameCount++;
                 progress = 1.0f;
+                if (stallResume && frame.timestamp >= resumeSeconds - 1.0) {
+                    stallResume = false;
+                    resumeSeconds = Double.NaN;
+                    STALL_RESUMES.remove(key);
+                }
             }
             logVideoState();
             return textureLocation == null ? null : new NetworkProjectionFrame(textureLocation, width, height);
@@ -1245,6 +1291,9 @@ public final class ClientNetworkProjectorStreams {
         private DecodedFrame(int width, int height, NativeImage image) {
             this(width, height, image, 0.0);
         }
+    }
+
+    private record StallResume(String url, double seconds, long recordedAt) {
     }
 
     public record AudioSource(String key, BilibiliResolver.ResolvedMedia media) {

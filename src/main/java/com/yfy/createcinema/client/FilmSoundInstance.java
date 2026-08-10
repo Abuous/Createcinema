@@ -1,6 +1,7 @@
 package com.yfy.createcinema.client;
 
 import com.yfy.createcinema.CreateCinema;
+import com.yfy.createcinema.ClientConfig;
 import com.yfy.createcinema.PlaybackSpeeds;
 import com.yfy.createcinema.block.SpeakerBlock;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
@@ -29,6 +30,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 public class FilmSoundInstance extends AbstractSoundInstance implements TickableSoundInstance {
+    private static final double RESYNC_THRESHOLD_SECONDS = 0.20;
+    private static final int RESYNC_CONFIRM_TICKS = 10;
     private final BlockPos projectorPos;
     private final BlockPos speakerPos;
     private final ProjectorBlockEntity projector;
@@ -38,9 +41,11 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
     private volatile double seekTarget;
     private volatile double streamStartTime = Double.NaN;
     private volatile boolean channelStarted;
+    private volatile boolean driftRestart;
     private double expectedTime;
     private boolean stopped;
     private boolean audioClockStarted;
+    private int driftTicks;
 
     public FilmSoundInstance(ProjectorBlockEntity projector, BlockPos speaker, FilmMetadata metadata) {
         super(soundLocation(projector.getFilmId(), speaker), SoundSource.RECORDS, RandomSource.create());
@@ -59,7 +64,7 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
         attenuation = SoundInstance.Attenuation.LINEAR;
         relative = false;
         sound = new Sound(location, ConstantFloat.of(1.0f), ConstantFloat.of(1.0f), 1,
-                Sound.Type.FILE, true, false, 48);
+                Sound.Type.FILE, true, false, ClientConfig.speakerAttenuationDistance());
     }
 
     @Override
@@ -91,7 +96,7 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
         if (minecraft.level == null || minecraft.player == null || projector.isRemoved() || projector.getLevel() == null
                 || !projector.getLevel().dimension().equals(minecraft.level.dimension())
                 || !projector.canProject() || !filmId.equals(projector.getFilmId())
-                || minecraft.player.distanceToSqr(x, y, z) > 96.0 * 96.0) {
+                || minecraft.player.distanceToSqr(x, y, z) > 48.0 * 48.0) {
             stopped = true;
             return;
         }
@@ -105,19 +110,15 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
         if (!audioClockStarted) {
             audioClockStarted = true;
             expectedTime = streamStartTime;
-            double drift = circularDistance(expectedTime, currentTime, duration);
-            if (drift > 0.20) {
-                CreateCinema.LOGGER.debug("Restarting film audio {} after {}s startup drift", filmId,
-                        String.format(java.util.Locale.ROOT, "%.3f", drift));
-                stopped = true;
-            }
-            return;
+        } else {
+            expectedTime = wrap(expectedTime + rate / 20.0, duration);
         }
-        expectedTime = wrap(expectedTime + rate / 20.0, duration);
         double drift = circularDistance(expectedTime, currentTime, duration);
-        if (drift > 0.20) {
-            CreateCinema.LOGGER.debug("Restarting film audio {} after {}s playback drift", filmId,
+        driftTicks = drift > RESYNC_THRESHOLD_SECONDS ? driftTicks + 1 : 0;
+        if (driftTicks >= RESYNC_CONFIRM_TICKS) {
+            CreateCinema.LOGGER.debug("Restarting film audio {} after {}s confirmed drift", filmId,
                     String.format(java.util.Locale.ROOT, "%.3f", drift));
+            driftRestart = true;
             stopped = true;
         }
     }
@@ -130,6 +131,10 @@ public class FilmSoundInstance extends AbstractSoundInstance implements Tickable
     @Override
     public boolean canStartSilent() {
         return true;
+    }
+
+    public boolean driftRestart() {
+        return driftRestart;
     }
 
     public BlockPos projectorPos() {

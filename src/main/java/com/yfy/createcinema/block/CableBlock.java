@@ -3,6 +3,7 @@ package com.yfy.createcinema.block;
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.content.equipment.wrench.IWrenchable;
 import com.yfy.createcinema.ModRegistry;
+import com.yfy.createcinema.client.ClientCableIndex;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.context.BlockPlaceContext;
@@ -42,6 +43,7 @@ public class CableBlock extends PipeBlock implements IWrenchable {
     @Override
     protected BlockState updateShape(BlockState state, Direction direction, BlockState neighborState,
                                      LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
+        ClientCableIndex.onBlockChanged(level, pos);
         return state.setValue(PROPERTY_BY_DIRECTION.get(direction), connectsTo(neighborState));
     }
 

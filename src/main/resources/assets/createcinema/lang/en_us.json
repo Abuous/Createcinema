@@ -88,6 +88,7 @@
   "gui.createcinema.network_quality.ultra": "1080p / 30fps",
   "gui.createcinema.stream.loading": "Loading...",
   "gui.createcinema.stream.loading_progress": "Loading %s%%",
+  "gui.createcinema.stream.recovering": "Network hiccup, reloading from %s...",
   "gui.createcinema.stream.playing": "Playing",
   "gui.createcinema.stream.ended": "Playlist finished",
   "gui.createcinema.playlist.single": "No playlist detected",

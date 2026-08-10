@@ -69,7 +69,6 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
         boolean filmDeleted = false;
         if (be instanceof ProjectorBlockEntity projector) {
             if (projector.hasDisplayUpgrade()) {
-                ClientProjectorAudio.stop(projector);
                 ClientFilmVideoStreams.stop(projector);
                 ScreenRect screen = findScreenCached(level, projector.getBlockPos(), facing);
                 if (screen == null) return;
@@ -83,13 +82,11 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
                 return;
             }
             if (!projector.canProject()) {
-                ClientProjectorAudio.stop(projector);
                 ClientFilmVideoStreams.stop(projector);
                 return;
             }
             ClientProjectorAudio.mark(projector);
             if (ClientFilmCache.isDeleted(projector.getFilmId())) {
-                ClientProjectorAudio.stop(projector);
                 texture = null;
                 videoWidth = 16;
                 videoHeight = 9;
@@ -112,15 +109,11 @@ public class ProjectorRenderer<T extends com.simibubi.create.content.kinetics.ba
             }
         } else if (be instanceof NetworkProjectorBlockEntity projector) {
             if (!projector.canProject()) {
-                ClientNetworkProjectorAudio.stop(projector);
-                ClientNetworkProjectorStreams.stop(projector);
                 return;
             }
             ClientNetworkProjectorAudio.mark(projector);
             ScreenRect screen = findScreenCached(level, projector.getBlockPos(), facing);
             if (screen == null) {
-                ClientNetworkProjectorAudio.stop(projector);
-                ClientNetworkProjectorStreams.stop(projector);
                 return;
             }
             double playTime = interpolatedPlayTime(projector.getPlayTime(), projector.getSpeed(), partialTick);

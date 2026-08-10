@@ -5,6 +5,7 @@
   "mixins": [
     "AllItemAttributeTypesMixin",
     "ItemEntityMixin",
+    "LevelMixin",
     "ServerGamePacketListenerMixin"
   ],
   "injectors": {

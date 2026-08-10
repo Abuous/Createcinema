@@ -45,6 +45,14 @@ public final class ClientCableIndex {
         return entry.speakers;
     }
 
+    /** Forces a live re-scan of the projector's cable topology, e.g. when the world was edited without events. */
+    public static void refresh(Level level, BlockPos projector) {
+        String key = key(level, projector);
+        Entry entry = ENTRIES.get(key);
+        if (entry == null) return;
+        rescan(key, level, entry.projector, entry.kind);
+    }
+
     public static void onBlockChanged(LevelAccessor level, BlockPos pos) {
         if (level == null || !level.isClientSide()) return;
         if (level.getClass().getName().startsWith("net.createmod.ponder.")) return;

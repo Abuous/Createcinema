@@ -12,6 +12,8 @@ public final class ClientConfig {
     private static final ModConfigSpec.IntValue SCREEN_MAX_HEIGHT;
     private static final ModConfigSpec.IntValue SCREEN_ANCHOR_RADIUS;
     private static final ModConfigSpec.IntValue SCREEN_MAX_DISTANCE;
+    private static final ModConfigSpec.DoubleValue SPEAKER_CLUSTER_DISTANCE;
+    private static final ModConfigSpec.IntValue SPEAKER_ATTENUATION_DISTANCE;
     private static final ModConfigSpec.BooleanValue BURN_CACHE_ENABLED;
     private static final ModConfigSpec.IntValue BURN_CACHE_MAX_GIB;
     private static final ModConfigSpec.BooleanValue BURN_HARDWARE_DECODING;
@@ -50,6 +52,13 @@ public final class ClientConfig {
         SCREEN_MAX_DISTANCE = builder
                 .comment("Maximum distance in blocks in front of a projector when locating a screen.")
                 .defineInRange("screenMaxDistance", 16, 1, 64);
+        SPEAKER_CLUSTER_DISTANCE = builder
+                .comment("Speakers closer than this distance (in blocks) are merged into one group that shares a ",
+                        "single audio stream, so they never echo each other. Speakers farther apart play independently.")
+                .defineInRange("speakerClusterDistance", 4.0, 0.5, 64.0);
+        SPEAKER_ATTENUATION_DISTANCE = builder
+                .comment("Distance in blocks over which speaker audio fades out linearly; beyond it the sound is silent.")
+                .defineInRange("speakerAttenuationDistance", 48, 1, 128);
         PROJECTOR_HARDWARE_DECODING = builder
                 .comment("Try a platform hardware decoder for H.264 film playback, then fall back to FFmpeg software decoding.")
                 .define("hardwareDecoding", true);
@@ -140,6 +149,14 @@ public final class ClientConfig {
 
     public static int screenMaxDistance() {
         return SCREEN_MAX_DISTANCE.get();
+    }
+
+    public static double speakerClusterDistance() {
+        return SPEAKER_CLUSTER_DISTANCE.get();
+    }
+
+    public static int speakerAttenuationDistance() {
+        return SPEAKER_ATTENUATION_DISTANCE.get();
     }
 
     public static boolean projectorHardwareDecoding() {

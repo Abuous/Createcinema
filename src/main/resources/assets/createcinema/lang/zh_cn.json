@@ -88,6 +88,7 @@
   "gui.createcinema.network_quality.ultra": "1080p / 30fps",
   "gui.createcinema.stream.loading": "正在加载...",
   "gui.createcinema.stream.loading_progress": "正在加载 %s%%",
+  "gui.createcinema.stream.recovering": "网络波动，正在从 %s 处重新加载...",
   "gui.createcinema.stream.playing": "正在播放",
   "gui.createcinema.stream.ended": "连播结束",
   "gui.createcinema.playlist.single": "未检测到可连播目录",

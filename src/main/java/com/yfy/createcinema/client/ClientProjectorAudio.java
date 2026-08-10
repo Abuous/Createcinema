@@ -1,6 +1,7 @@
 package com.yfy.createcinema.client;
 
 import com.yfy.createcinema.CreateCinema;
+import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.blockentity.ProjectorBlockEntity;
 import com.yfy.createcinema.film.FilmMetadata;
 import net.minecraft.client.Minecraft;
@@ -10,13 +11,19 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public final class ClientProjectorAudio {
     private static final Map<String, ActiveAudio> ACTIVE = new HashMap<>();
     private static final Map<ProjectorBlockEntity, Long> TOUCHED = new HashMap<>();
+    private static final Map<String, Long> LAST_DRIFT_RESTART = new HashMap<>();
+    private static final Map<String, Long> LAST_TOPOLOGY_REFRESH = new HashMap<>();
     private static final long STALE_AFTER_TICKS = 20L;
+    private static final long DRIFT_RESTART_COOLDOWN_MILLIS = 3_000L;
+    private static final long TOPOLOGY_REFRESH_INTERVAL_TICKS = 40L;
+    private static final double MAX_DISTANCE = 48.0;
 
     private ClientProjectorAudio() {
     }
@@ -39,14 +46,15 @@ public final class ClientProjectorAudio {
         long now = minecraft.level.getGameTime();
         Map<String, ProjectorCandidate> candidates = new HashMap<>();
         TOUCHED.entrySet().removeIf(entry -> now - entry.getValue() > STALE_AFTER_TICKS);
-        for (ProjectorBlockEntity projector : TOUCHED.keySet()) {
+        Set<ProjectorBlockEntity> visible = new HashSet<>(TOUCHED.keySet());
+        for (ProjectorBlockEntity projector : visible) {
             if (projector.isRemoved() || projector.getLevel() == null) continue;
             if (!projector.getLevel().dimension().equals(minecraft.level.dimension())) continue;
             BlockPos pos = projector.getBlockPos();
             Vec3 worldPos = ClientPhysicalAudioCompat.worldPosition(projector, pos);
             double distance = minecraft.player.distanceToSqr(worldPos);
-            if (distance > 96.0 * 96.0) continue;
-            if (!projector.canProject()) {
+            if (distance > MAX_DISTANCE * MAX_DISTANCE) continue;
+            if (!projector.canProject() || ClientFilmCache.isDeleted(projector.getFilmId())) {
                 stop(projector);
                 continue;
             }
@@ -83,15 +91,23 @@ public final class ClientProjectorAudio {
             return;
         }
         ActiveAudio current = ACTIVE.get(key);
-        if (current != null && !current.sound.isStopped()) return;
+        if (current != null && !current.sound.isStopped() && isSpeakerBlock(minecraft.level, current.speaker)) return;
+        if (current != null && current.sound.driftRestart()) {
+            long last = LAST_DRIFT_RESTART.getOrDefault(key, 0L);
+            if (System.currentTimeMillis() - last < DRIFT_RESTART_COOLDOWN_MILLIS) return;
+        }
+        boolean drifted = current != null && current.sound.driftRestart();
         stopKey(key);
+        if (drifted) LAST_DRIFT_RESTART.put(key, System.currentTimeMillis());
 
         ClientCableIndex.ensure(projector.getLevel(), projector.getBlockPos(), ClientCableIndex.Kind.FILM);
         BlockPos speaker = ClientCableIndex.speakersOf(projector.getLevel(), projector.getBlockPos()).stream()
+                .filter(pos -> isSpeakerBlock(minecraft.level, pos))
                 .min((first, second) -> Double.compare(distanceToPlayer(minecraft, projector, first),
                         distanceToPlayer(minecraft, projector, second)))
                 .orElse(null);
         if (speaker == null) {
+            refreshTopologyIfDue(minecraft, key, projector);
             stopKey(key);
             return;
         }
@@ -107,8 +123,12 @@ public final class ClientProjectorAudio {
         String key = sourceKey(projector);
         ActiveAudio current = ACTIVE.get(key);
         if (current == null) {
-            CreateCinema.LOGGER.info("Film audio topology changed at {} with no active sound: removed={}, gained={}",
-                    projectorPos, removed, gained);
+            if (gained.isEmpty()) return;
+            FilmMetadata metadata = ClientFilmCache.metadata(projector.getFilmId());
+            if (metadata != null) {
+                CreateCinema.LOGGER.info("Restarting film audio for regained speakers at projector {}", projectorPos);
+                update(projector, metadata);
+            }
             return;
         }
         if (removed.contains(current.speaker)) {
@@ -153,12 +173,15 @@ public final class ClientProjectorAudio {
         ACTIVE.values().forEach(active -> minecraft.getSoundManager().stop(active.sound));
         ACTIVE.clear();
         TOUCHED.clear();
+        LAST_DRIFT_RESTART.clear();
+        LAST_TOPOLOGY_REFRESH.clear();
     }
 
     private static void stopMissing(Set<String> sources) {
         Minecraft minecraft = Minecraft.getInstance();
         ACTIVE.entrySet().removeIf(entry -> {
             if (sources.contains(entry.getKey())) return false;
+            LAST_DRIFT_RESTART.remove(entry.getKey());
             minecraft.getSoundManager().stop(entry.getValue().sound);
             return true;
         });
@@ -166,7 +189,20 @@ public final class ClientProjectorAudio {
 
     private static void stopKey(String key) {
         ActiveAudio removed = ACTIVE.remove(key);
+        LAST_DRIFT_RESTART.remove(key);
         if (removed != null) Minecraft.getInstance().getSoundManager().stop(removed.sound);
+    }
+
+    private static void refreshTopologyIfDue(Minecraft minecraft, String key, ProjectorBlockEntity projector) {
+        long now = minecraft.level.getGameTime();
+        Long last = LAST_TOPOLOGY_REFRESH.get(key);
+        if (last != null && now - last < TOPOLOGY_REFRESH_INTERVAL_TICKS) return;
+        LAST_TOPOLOGY_REFRESH.put(key, now);
+        ClientCableIndex.refresh(projector.getLevel(), projector.getBlockPos());
+    }
+
+    private static boolean isSpeakerBlock(Level level, BlockPos pos) {
+        return level.getBlockState(pos).is(ModRegistry.SPEAKER.get());
     }
 
     private static double distanceToPlayer(Minecraft minecraft, ProjectorBlockEntity projector, BlockPos pos) {
