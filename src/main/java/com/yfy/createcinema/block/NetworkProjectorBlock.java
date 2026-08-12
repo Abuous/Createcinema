@@ -7,7 +7,7 @@ import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.block.IBE;
 import com.yfy.createcinema.ModRegistry;
 import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
-import com.yfy.createcinema.client.ClientCableIndex;
+import com.yfy.createcinema.client.network.ClientCableIndex;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;

@@ -1,5 +1,6 @@
 package com.yfy.createcinema.packet;
 
+import com.yfy.createcinema.client.network.ClientPacketHandlers;
 import com.yfy.createcinema.CreateCinema;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -39,6 +40,6 @@ public record S2CBurnStatusPacket(BlockPos burnerPos, String message, float prog
     }
 
     public void handle(IPayloadContext ctx) {
-        ctx.enqueueWork(() -> com.yfy.createcinema.client.ClientPacketHandlers.handleBurnStatus(this));
+        ctx.enqueueWork(() -> com.yfy.createcinema.client.network.ClientPacketHandlers.handleBurnStatus(this));
     }
 }

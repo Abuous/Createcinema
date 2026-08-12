@@ -1,6 +1,6 @@
 package com.yfy.createcinema;
 
-import com.yfy.createcinema.client.PlatformInfo;
+import com.yfy.createcinema.client.browser.PlatformInfo;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class ClientConfig {
@@ -19,6 +19,12 @@ public final class ClientConfig {
     private static final ModConfigSpec.BooleanValue BURN_HARDWARE_DECODING;
     private static final ModConfigSpec.BooleanValue BURN_HARDWARE_ENCODING;
     private static final ModConfigSpec.BooleanValue PROJECTOR_HARDWARE_DECODING;
+    private static final ModConfigSpec.ConfigValue<String> BILIBILI_SESSDATA;
+    private static final ModConfigSpec.ConfigValue<String> BILIBILI_BILL_JCT;
+    private static final ModConfigSpec.ConfigValue<String> BILIBILI_BUVID3;
+    private static final ModConfigSpec.ConfigValue<String> BILIBILI_BROWSER_COOKIES;
+    private static final ModConfigSpec.ConfigValue<String> BILIBILI_REFRESH_TOKEN;
+    private static final ModConfigSpec.IntValue BILIBILI_VIP_QUALITY;
     private static volatile java.util.function.Consumer<String> browserShutdown = provider -> { };
 
     static {
@@ -53,8 +59,8 @@ public final class ClientConfig {
                 .comment("Maximum distance in blocks in front of a projector when locating a screen.")
                 .defineInRange("screenMaxDistance", 16, 1, 64);
         SPEAKER_CLUSTER_DISTANCE = builder
-                .comment("Speakers closer than this distance (in blocks) are merged into one group that shares a ",
-                        "single audio stream, so they never echo each other. Speakers farther apart play independently.")
+                .comment("Deprecated compatibility value. Network audio now uses one source at the nearest ",
+                        "redstone-powered speaker regardless of speaker distance.")
                 .defineInRange("speakerClusterDistance", 4.0, 0.5, 64.0);
         SPEAKER_ATTENUATION_DISTANCE = builder
                 .comment("Distance in blocks over which speaker audio fades out linearly; beyond it the sound is silent.")
@@ -76,6 +82,30 @@ public final class ClientConfig {
         BURN_HARDWARE_ENCODING = builder
                 .comment("Try an available platform H.264 hardware encoder, then fall back to software encoding.")
                 .define("hardwareEncoding", true);
+        builder.pop();
+        builder.push("bilibili");
+        BILIBILI_SESSDATA = builder
+                .comment("Bilibili SESSDATA cookie obtained via the local browser QR login. Plaintext; ",
+                        "treat like a password. Only used to fetch media for your own account.")
+                .define("sessdata", "");
+        BILIBILI_BILL_JCT = builder
+                .comment("Bilibili CSRF token paired with SESSDATA.")
+                .define("biliJct", "");
+        BILIBILI_BUVID3 = builder
+                .comment("Bilibili device id used to avoid risk control on authenticated requests.")
+                .define("buvid3", "");
+        BILIBILI_BROWSER_COOKIES = builder
+                .comment("Full cookie set captured from the local browser session used for Bilibili ",
+                        "login (buvid_fp, b_nut, b_lsid, buvid4, ...). Sent with API requests so risk ",
+                        "control does not block them. Plaintext; treat like a password.")
+                .define("browserCookies", "");
+        BILIBILI_REFRESH_TOKEN = builder
+                .comment("Bilibili refresh token; used to silently renew SESSDATA before it expires.")
+                .define("refreshToken", "");
+        BILIBILI_VIP_QUALITY = builder
+                .comment("Local member-quality target used only when a network projector selects member quality: ",
+                        "1 = 1080P60, 3 = 2K60, 2 = 4K60. Legacy value 0 maps to 1080P60.")
+                .defineInRange("vipQuality", 1, 0, 3);
         builder.pop();
         SPEC = builder.build();
     }
@@ -177,5 +207,72 @@ public final class ClientConfig {
 
     public static boolean burnHardwareEncoding() {
         return BURN_HARDWARE_ENCODING.get();
+    }
+
+    public static String bilibiliSessdata() {
+        return BILIBILI_SESSDATA.get();
+    }
+
+    public static void setBilibiliSessdata(String value) {
+        setBilibiliString(BILIBILI_SESSDATA, value);
+    }
+
+    public static String bilibiliBiliJct() {
+        return BILIBILI_BILL_JCT.get();
+    }
+
+    public static void setBilibiliBiliJct(String value) {
+        setBilibiliString(BILIBILI_BILL_JCT, value);
+    }
+
+    public static String bilibiliBuvid3() {
+        return BILIBILI_BUVID3.get();
+    }
+
+    public static void setBilibiliBuvid3(String value) {
+        setBilibiliString(BILIBILI_BUVID3, value);
+    }
+
+    public static String bilibiliBrowserCookies() {
+        return BILIBILI_BROWSER_COOKIES.get();
+    }
+
+    public static void setBilibiliBrowserCookies(String value) {
+        setBilibiliString(BILIBILI_BROWSER_COOKIES, value);
+    }
+
+    public static String bilibiliRefreshToken() {
+        return BILIBILI_REFRESH_TOKEN.get();
+    }
+
+    public static void setBilibiliRefreshToken(String value) {
+        setBilibiliString(BILIBILI_REFRESH_TOKEN, value);
+    }
+
+    public static void clearBilibiliSession() {
+        BILIBILI_SESSDATA.set("");
+        BILIBILI_BILL_JCT.set("");
+        BILIBILI_BUVID3.set("");
+        BILIBILI_BROWSER_COOKIES.set("");
+        BILIBILI_REFRESH_TOKEN.set("");
+        BILIBILI_SESSDATA.save();
+    }
+
+    public static int bilibiliVipQuality() {
+        return BILIBILI_VIP_QUALITY.get();
+    }
+
+    public static BilibiliMemberQuality bilibiliMemberQuality() {
+        return BilibiliMemberQuality.byConfigId(BILIBILI_VIP_QUALITY.get());
+    }
+
+    public static void setBilibiliVipQuality(int quality) {
+        BILIBILI_VIP_QUALITY.set(quality);
+        BILIBILI_VIP_QUALITY.save();
+    }
+
+    private static void setBilibiliString(ModConfigSpec.ConfigValue<String> setting, String value) {
+        setting.set(value == null ? "" : value);
+        setting.save();
     }
 }

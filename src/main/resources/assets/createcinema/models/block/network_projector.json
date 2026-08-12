@@ -3,6 +3,7 @@
   "render_type": "minecraft:cutout",
   "source": "createcinema:bedrock/block/network_projector.json",
   "textures": {
-    "texture": "createcinema:block/network_projector"
+    "texture": "createcinema:block/network_projector",
+    "particle": "createcinema:block/network_projector"
   }
 }

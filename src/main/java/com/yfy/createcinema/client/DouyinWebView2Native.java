@@ -10,7 +10,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 
-final class DouyinWebView2Native {
+public final class DouyinWebView2Native {
     private static final String RESOURCE =
             "/assets/createcinema/native/windows-x86_64/douyinwebview.dll";
     private static boolean loaded;
@@ -49,32 +49,32 @@ final class DouyinWebView2Native {
         loaded = true;
     }
 
-    static boolean isRuntimeAvailable(Path gameDirectory) throws IOException {
+    public static boolean isRuntimeAvailable(Path gameDirectory) throws IOException {
         load(gameDirectory);
         return isRuntimeAvailable0();
     }
 
-    static void initialize(Path gameDirectory, Path profile) throws IOException {
+    public static void initialize(Path gameDirectory, Path profile) throws IOException {
         load(gameDirectory);
         Files.createDirectories(profile);
         initialize0(profile.toAbsolutePath().normalize().toString());
     }
 
-    static void showLogin(String url) throws IOException {
+    public static void showLogin(String url) throws IOException {
         showLogin0(url);
     }
 
-    static byte[] capture(String navigationUrl, String host, List<String> paths,
+    public static byte[] capture(String navigationUrl, String host, List<String> paths,
                            String queryName, String queryValue, Duration timeout) throws IOException {
         return capture0(navigationUrl, host, paths.toArray(String[]::new), queryName, queryValue,
                 Math.toIntExact(timeout.toMillis()));
     }
 
-    static void hide() {
+    public static void hide() {
         if (loaded) hide0();
     }
 
-    static boolean isAuthorized() {
+    public static boolean isAuthorized() {
         try {
             return loaded && hasAuthorizationCookies0("https://www.douyin.com/",
                     new String[]{"sessionid", "sessionid_ss", "sid_tt"});
@@ -83,12 +83,17 @@ final class DouyinWebView2Native {
         }
     }
 
-    static boolean hasAuthorizationCookies(String url, List<String> cookieNames) throws IOException {
+    public static boolean hasAuthorizationCookies(String url, List<String> cookieNames) throws IOException {
         if (!loaded) throw new IOException("WebView2 is not initialized");
         return hasAuthorizationCookies0(url, cookieNames.toArray(String[]::new));
     }
 
-    static synchronized void shutdown() {
+    public static String cookieHeader(String url) throws IOException {
+        if (!loaded) throw new IOException("WebView2 is not initialized");
+        return cookieHeader0(url);
+    }
+
+    public static synchronized void shutdown() {
         if (loaded) shutdown0();
     }
 
@@ -107,6 +112,8 @@ final class DouyinWebView2Native {
     private static native boolean isAuthorized0();
 
     private static native boolean hasAuthorizationCookies0(String url, String[] cookieNames) throws IOException;
+
+    private static native String cookieHeader0(String url) throws IOException;
 
     private static native void shutdown0();
 }

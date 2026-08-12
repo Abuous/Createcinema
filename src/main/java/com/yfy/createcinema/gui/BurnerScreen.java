@@ -1,7 +1,7 @@
 package com.yfy.createcinema.gui;
 
-import com.yfy.createcinema.client.ClientPacketHandlers;
-import com.yfy.createcinema.client.ClientVideoBurner;
+import com.yfy.createcinema.client.network.ClientPacketHandlers;
+import com.yfy.createcinema.client.render.ClientVideoBurner;
 import com.yfy.createcinema.film.FilmQuality;
 import com.yfy.createcinema.item.FilmItem;
 import net.minecraft.client.gui.GuiGraphics;

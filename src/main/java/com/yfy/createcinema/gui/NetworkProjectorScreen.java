@@ -1,7 +1,7 @@
 package com.yfy.createcinema.gui;
 import com.yfy.createcinema.NetworkVideoQuality;
 import com.yfy.createcinema.blockentity.NetworkProjectorBlockEntity;
-import com.yfy.createcinema.client.ClientNetworkProjectorStreams;
+import com.yfy.createcinema.client.network.ClientNetworkProjectorStreams;
 import com.yfy.createcinema.packet.C2SSetNetworkProjectorQualityPacket;
 import com.yfy.createcinema.packet.C2SSetNetworkProjectorUrlPacket;
 import net.minecraft.client.gui.GuiGraphics;

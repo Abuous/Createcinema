@@ -1,7 +1,7 @@
 package com.yfy.createcinema.mixin;
 
 import com.yfy.createcinema.block.ScreenBlock;
-import com.yfy.createcinema.client.ClientNetworkProjectorAudio;
+import com.yfy.createcinema.client.audio.ClientNetworkProjectorAudio;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;

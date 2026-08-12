@@ -331,6 +331,60 @@ public:
         return true;
     }
 
+    bool cookieHeader(const std::wstring& url, std::string& header, std::string& error) {
+        auto operation = std::make_shared<Operation>();
+        if (!submit([this, operation, url] {
+                if (!webview2_) {
+                    operation->fail("WebView2 is not ready");
+                    return;
+                }
+                ComPtr<ICoreWebView2CookieManager> manager;
+                if (FAILED(webview2_->get_CookieManager(&manager)) || !manager) {
+                    operation->fail("Could not obtain the WebView2 cookie manager");
+                    return;
+                }
+                HRESULT result = manager->GetCookies(
+                        url.c_str(),
+                        Callback<ICoreWebView2GetCookiesCompletedHandler>(
+                                [operation](HRESULT result, ICoreWebView2CookieList* cookies) -> HRESULT {
+                                    if (FAILED(result) || cookies == nullptr) {
+                                        operation->fail("Could not read WebView2 cookies");
+                                        return S_OK;
+                                    }
+                                    std::string header;
+                                    UINT32 count = 0;
+                                    if (SUCCEEDED(cookies->get_Count(&count))) {
+                                        for (UINT32 index = 0; index < count; index++) {
+                                            ComPtr<ICoreWebView2Cookie> cookie;
+                                            if (FAILED(cookies->GetValueAtIndex(index, &cookie)) || !cookie) continue;
+                                            wchar_t* rawName = nullptr;
+                                            wchar_t* rawValue = nullptr;
+                                            if (FAILED(cookie->get_Name(&rawName)) || rawName == nullptr ||
+                                                FAILED(cookie->get_Value(&rawValue)) || rawValue == nullptr) {
+                                                if (rawName != nullptr) CoTaskMemFree(rawName);
+                                                if (rawValue != nullptr) CoTaskMemFree(rawValue);
+                                                continue;
+                                            }
+                                            std::string name = utf8(rawName);
+                                            std::string value = utf8(rawValue);
+                                            CoTaskMemFree(rawName);
+                                            CoTaskMemFree(rawValue);
+                                            if (name.empty()) continue;
+                                            if (!header.empty()) header.append("; ");
+                                            header.append(name).append("=").append(value);
+                                        }
+                                    }
+                                    operation->complete(std::move(header));
+                                    return S_OK;
+                                })
+                                .Get());
+                if (FAILED(result)) operation->fail("Could not request WebView2 cookies: " + hresultMessage(result));
+            }, error)) return false;
+        if (!waitOperation(operation, std::chrono::seconds(10), error, nullptr)) return false;
+        header = std::move(operation->result);
+        return true;
+    }
+
     void shutdown() {
         std::thread thread;
         HWND window = nullptr;
@@ -719,7 +773,7 @@ std::shared_ptr<WebViewEngine> currentEngine() {
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_isRuntimeAvailable0(JNIEnv*, jclass) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_isRuntimeAvailable0(JNIEnv*, jclass) {
     wchar_t* version = nullptr;
     HRESULT result = GetAvailableCoreWebView2BrowserVersionString(nullptr, &version);
     if (version) CoTaskMemFree(version);
@@ -727,7 +781,7 @@ Java_com_yfy_createcinema_client_DouyinWebView2Native_isRuntimeAvailable0(JNIEnv
 }
 
 JNIEXPORT void JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_initialize0(JNIEnv* env, jclass, jstring profile) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_initialize0(JNIEnv* env, jclass, jstring profile) {
     std::wstring profilePath = wide(env, profile);
     if (profilePath.empty()) {
         throwIOException(env, "WebView2 profile path is empty");
@@ -744,7 +798,7 @@ Java_com_yfy_createcinema_client_DouyinWebView2Native_initialize0(JNIEnv* env, j
 }
 
 JNIEXPORT void JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_showLogin0(JNIEnv* env, jclass, jstring url) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_showLogin0(JNIEnv* env, jclass, jstring url) {
     auto instance = currentEngine();
     if (!instance) {
         throwIOException(env, "WebView2 is not initialized");
@@ -755,7 +809,7 @@ Java_com_yfy_createcinema_client_DouyinWebView2Native_showLogin0(JNIEnv* env, jc
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_capture0(
+Java_com.yfy.createcinema.client.DouyinWebView2Native_capture0(
         JNIEnv* env, jclass, jstring navigationUrl, jstring expectedHost, jobjectArray expectedPaths,
         jstring queryName, jstring queryValue, jint timeoutMillis) {
     auto instance = currentEngine();
@@ -797,19 +851,19 @@ Java_com_yfy_createcinema_client_DouyinWebView2Native_capture0(
 }
 
 JNIEXPORT void JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_hide0(JNIEnv*, jclass) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_hide0(JNIEnv*, jclass) {
     auto instance = currentEngine();
     if (instance) instance->hide();
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_isAuthorized0(JNIEnv*, jclass) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_isAuthorized0(JNIEnv*, jclass) {
     auto instance = currentEngine();
     return instance && instance->authorized() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_hasAuthorizationCookies0(
+Java_com.yfy.createcinema.client.DouyinWebView2Native_hasAuthorizationCookies0(
         JNIEnv* env, jclass, jstring url, jobjectArray cookieNames) {
     auto instance = currentEngine();
     if (!instance) {
@@ -845,8 +899,29 @@ Java_com_yfy_createcinema_client_DouyinWebView2Native_hasAuthorizationCookies0(
     return authorized ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com.yfy.createcinema.client.DouyinWebView2Native_cookieHeader0(JNIEnv* env, jclass, jstring url) {
+    auto instance = currentEngine();
+    if (!instance) {
+        throwIOException(env, "WebView2 is not initialized");
+        return nullptr;
+    }
+    std::wstring cookieUrl = wide(env, url);
+    if (cookieUrl.empty()) {
+        throwIOException(env, "WebView2 cookie URL is empty");
+        return nullptr;
+    }
+    std::string header;
+    std::string error;
+    if (!instance->cookieHeader(cookieUrl, header, error)) {
+        throwIOException(env, error.empty() ? "Could not read WebView2 cookies" : error);
+        return nullptr;
+    }
+    return env->NewStringUTF(header.c_str());
+}
+
 JNIEXPORT void JNICALL
-Java_com_yfy_createcinema_client_DouyinWebView2Native_shutdown0(JNIEnv*, jclass) {
+Java_com.yfy.createcinema.client.DouyinWebView2Native_shutdown0(JNIEnv*, jclass) {
     std::shared_ptr<WebViewEngine> instance;
     {
         std::lock_guard lock(engineMutex);

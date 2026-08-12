@@ -1,5 +1,6 @@
 package com.yfy.createcinema.packet;
 
+import com.yfy.createcinema.client.network.ClientPacketHandlers;
 import com.yfy.createcinema.CreateCinema;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -26,6 +27,6 @@ public record S2CFilmAvailablePacket(String filmId) implements CustomPacketPaylo
     }
 
     public void handle(IPayloadContext ctx) {
-        ctx.enqueueWork(() -> com.yfy.createcinema.client.ClientPacketHandlers.handleFilmAvailable(this));
+        ctx.enqueueWork(() -> com.yfy.createcinema.client.network.ClientPacketHandlers.handleFilmAvailable(this));
     }
 }

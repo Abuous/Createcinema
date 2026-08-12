@@ -21,6 +21,9 @@ public class ModPackets {
                 C2SSetNetworkProjectorQualityPacket.STREAM_CODEC, C2SSetNetworkProjectorQualityPacket::handle);
         registrar.playToServer(C2SNetworkProjectorMediaInfoPacket.TYPE,
                 C2SNetworkProjectorMediaInfoPacket.STREAM_CODEC, C2SNetworkProjectorMediaInfoPacket::handle);
+        registrar.playToServer(C2SNetworkProjectorPlaybackHealthPacket.TYPE,
+                C2SNetworkProjectorPlaybackHealthPacket.STREAM_CODEC,
+                C2SNetworkProjectorPlaybackHealthPacket::handle);
         registrar.playToServer(C2SNetworkProjectorDouyinContentPacket.TYPE,
                 C2SNetworkProjectorDouyinContentPacket.STREAM_CODEC,
                 C2SNetworkProjectorDouyinContentPacket::handle);

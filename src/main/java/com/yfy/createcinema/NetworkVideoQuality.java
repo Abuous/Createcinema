@@ -3,7 +3,8 @@ package com.yfy.createcinema;
 public enum NetworkVideoQuality {
     SMOOTH(0, 854, 480, 24.0, 32, "hd", "gui.createcinema.network_quality.smooth"),
     HIGH(1, 1280, 720, 30.0, 64, "shd", "gui.createcinema.network_quality.high"),
-    ULTRA(2, 1920, 1080, 30.0, 80, "fhd", "gui.createcinema.network_quality.ultra");
+    ULTRA(2, 1920, 1080, 30.0, 80, "fhd", "gui.createcinema.network_quality.ultra"),
+    MEMBER(3, 3840, 2160, 60.0, 120, "fhd", "gui.createcinema.network_quality.member");
 
     private final int id;
     private final int maxWidth;
@@ -31,6 +32,9 @@ public enum NetworkVideoQuality {
     public int bilibiliQn() { return bilibiliQn; }
     public String tencentDefinition() { return tencentDefinition; }
     public String translationKey() { return translationKey; }
+
+    /** A server-synced opt-in for each viewer's local Bilibili member-quality setting. */
+    public boolean isMemberQuality() { return this == MEMBER; }
 
     public NetworkVideoQuality next() {
         return values()[(ordinal() + 1) % values().length];

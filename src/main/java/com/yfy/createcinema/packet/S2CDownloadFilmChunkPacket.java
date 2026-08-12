@@ -1,5 +1,6 @@
 package com.yfy.createcinema.packet;
 
+import com.yfy.createcinema.client.network.ClientPacketHandlers;
 import com.yfy.createcinema.CreateCinema;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -39,6 +40,6 @@ public record S2CDownloadFilmChunkPacket(String filmId, int index, int total, by
     }
 
     public void handle(IPayloadContext ctx) {
-        ctx.enqueueWork(() -> com.yfy.createcinema.client.ClientPacketHandlers.handleFilmChunk(this));
+        ctx.enqueueWork(() -> com.yfy.createcinema.client.network.ClientPacketHandlers.handleFilmChunk(this));
     }
 }

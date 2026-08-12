@@ -2,9 +2,10 @@ package com.yfy.createcinema;
 
 import com.simibubi.create.api.stress.BlockStressValues;
 import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.yfy.createcinema.client.CreateCinemaPonderPlugin;
+import com.yfy.createcinema.client.connected.CableCasingCTRegistration;
+import com.yfy.createcinema.client.ponder.CreateCinemaPonderPlugin;
 import com.yfy.createcinema.datagen.ModItemModelProvider;
-import com.yfy.createcinema.client.PlatformInfo;
+import com.yfy.createcinema.client.browser.PlatformInfo;
 import com.yfy.createcinema.display.CinemaDisplaySources;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
@@ -48,6 +49,7 @@ public class CreateCinema {
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             CreateCinemaPonderPlugin.register();
+            CableCasingCTRegistration.register();
         }
     }
 

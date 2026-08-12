@@ -7,6 +7,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
 import com.yfy.createcinema.ModRegistry;
+import com.yfy.createcinema.CreateCinema;
 import com.yfy.createcinema.NetworkVideoQuality;
 import com.yfy.createcinema.PlaybackSpeeds;
 import com.yfy.createcinema.gui.NetworkProjectorMenu;
@@ -16,6 +17,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleMenuProvider;
@@ -26,7 +28,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class NetworkProjectorBlockEntity extends KineticBlockEntity implements Container {
@@ -41,13 +45,38 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         ERROR
     }
 
+    public enum PlaybackHealth {
+        HEALTHY,
+        BUFFERING,
+        SOURCE_UNREACHABLE,
+        LOCAL_FAILURE
+    }
+
+    public enum GlobalPauseReason {
+        NONE,
+        SOURCE_OUTAGE,
+        SERVER_NETWORK
+    }
+
+    private static final long HEALTH_FRESH_TICKS = 60L;
+    private static final long HEALTH_LEASE_TICKS = 200L;
+    private static final long PAUSE_CONFIRM_TICKS = 60L;
+    private static final long RESUME_CONFIRM_TICKS = 40L;
+    private static final int DEGRADED_LATENCY_MILLIS = 1_000;
+
     private String url = "";
     private double playTime;
     private double mediaDurationSeconds;
     private double mediaTimeSeconds;
+    private double mediaTimePlayTimeAnchor;
     private boolean mediaLive;
     private MediaStatus mediaStatus = MediaStatus.IDLE;
     private int mediaRevision;
+    private GlobalPauseReason globalPauseReason = GlobalPauseReason.NONE;
+    private final Map<UUID, ViewerHealth> viewerHealth = new HashMap<>();
+    private GlobalPauseReason pendingPauseReason = GlobalPauseReason.NONE;
+    private long pendingPauseSince;
+    private long healthySince;
     private volatile UUID mediaOwner;
     private volatile String douyinContentId = "";
     private volatile int douyinContentRevision;
@@ -88,9 +117,14 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
     public void tick() {
         super.tick();
         if (level == null) return;
-        if (!level.isClientSide) updateRemoteLinks();
+        if (!level.isClientSide) {
+            updateRemoteLinks();
+            evaluatePlaybackHealth();
+        }
         boolean projecting = canProject();
-        if (projecting) playTime += PlaybackSpeeds.secondsPerTick(getSpeed());
+        if (projecting && globalPauseReason == GlobalPauseReason.NONE) {
+            playTime += PlaybackSpeeds.secondsPerTick(getSpeed());
+        }
         if (!level.isClientSide && (projecting != wasProjecting || level.getGameTime() % 20L == 0L)) {
             setChanged();
             sendData();
@@ -118,12 +152,163 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         return mediaTimeSeconds;
     }
 
+    public double getCurrentMediaTimeSeconds() {
+        double current = mediaTimeSeconds;
+        if (!mediaLive && mediaStatus != MediaStatus.ENDED && canProject()) {
+            current += Math.max(0.0, playTime - mediaTimePlayTimeAnchor);
+        }
+        if (mediaDurationSeconds > 0.0) {
+            current %= mediaDurationSeconds;
+            if (current < 0.0) current += mediaDurationSeconds;
+        }
+        return Math.max(0.0, current);
+    }
+
     public boolean isMediaLive() {
         return mediaLive;
     }
 
     public MediaStatus getMediaStatus() {
         return mediaStatus;
+    }
+
+    public int getMediaRevision() {
+        return mediaRevision;
+    }
+
+    public GlobalPauseReason getGlobalPauseReason() {
+        return globalPauseReason;
+    }
+
+    public boolean isGloballyPaused() {
+        return globalPauseReason != GlobalPauseReason.NONE;
+    }
+
+    public void reportPlaybackHealth(ServerPlayer player, String sourceUrl, int reportedNavigationRevision,
+                                     PlaybackHealth health) {
+        if (level == null || level.isClientSide || !canProject() || player.level() != level || !url.equals(sourceUrl)
+                || navigationRevision != reportedNavigationRevision || health == null
+                || player.distanceToSqr(Vec3.atCenterOf(worldPosition)) > 128.0 * 128.0) {
+            return;
+        }
+        long now = level.getGameTime();
+        ViewerHealth existing = viewerHealth.get(player.getUUID());
+        if (existing != null && existing.health == PlaybackHealth.SOURCE_UNREACHABLE
+                && health == PlaybackHealth.BUFFERING) {
+            health = PlaybackHealth.SOURCE_UNREACHABLE;
+        }
+        viewerHealth.put(player.getUUID(), new ViewerHealth(health, now));
+    }
+
+    private void evaluatePlaybackHealth() {
+        if (level == null || level.isClientSide || level.getServer() == null) return;
+        if (!canProject()) {
+            if (!viewerHealth.isEmpty() || globalPauseReason != GlobalPauseReason.NONE) resetPlaybackHealth();
+            return;
+        }
+        long now = level.getGameTime();
+        viewerHealth.entrySet().removeIf(entry -> now - entry.getValue().reportedAt > HEALTH_LEASE_TICKS
+                || level.getServer().getPlayerList().getPlayer(entry.getKey()) == null);
+
+        boolean singleplayer = level.getServer().isSingleplayer() && !level.getServer().isPublished();
+        int retained = 0;
+        int fresh = 0;
+        int healthy = 0;
+        int sourceFailures = 0;
+        int degradedConnections = 0;
+        for (var entry : viewerHealth.entrySet()) {
+            ViewerHealth report = entry.getValue();
+            retained++;
+            boolean isFresh = now - report.reportedAt <= HEALTH_FRESH_TICKS;
+            if (isFresh) {
+                fresh++;
+                if (report.health == PlaybackHealth.HEALTHY) healthy++;
+                if (report.health == PlaybackHealth.SOURCE_UNREACHABLE) sourceFailures++;
+            }
+            ServerPlayer player = level.getServer().getPlayerList().getPlayer(entry.getKey());
+            if (!isFresh || player == null || player.hasDisconnected()
+                    || player.connection.latency() >= DEGRADED_LATENCY_MILLIS) {
+                degradedConnections++;
+            }
+        }
+
+        GlobalPauseReason desired = GlobalPauseReason.NONE;
+        if (singleplayer) {
+            if (sourceFailures > 0) desired = GlobalPauseReason.SOURCE_OUTAGE;
+        } else if (fresh >= 2 && healthy == 0 && sourceFailures * 3 >= fresh * 2) {
+            desired = GlobalPauseReason.SOURCE_OUTAGE;
+        } else if (retained >= 2 && degradedConnections * 3 >= retained * 2) {
+            desired = GlobalPauseReason.SERVER_NETWORK;
+        }
+
+        if (globalPauseReason == GlobalPauseReason.NONE) {
+            healthySince = 0L;
+            if (desired == GlobalPauseReason.NONE) {
+                pendingPauseReason = GlobalPauseReason.NONE;
+                pendingPauseSince = 0L;
+                return;
+            }
+            if (pendingPauseReason != desired) {
+                pendingPauseReason = desired;
+                pendingPauseSince = now;
+                return;
+            }
+            if (now - pendingPauseSince >= PAUSE_CONFIRM_TICKS) setGlobalPauseReason(desired);
+            return;
+        }
+
+        if (desired == globalPauseReason) {
+            pendingPauseReason = GlobalPauseReason.NONE;
+            pendingPauseSince = 0L;
+            healthySince = 0L;
+            return;
+        }
+        if (desired != GlobalPauseReason.NONE) {
+            healthySince = 0L;
+            if (pendingPauseReason != desired) {
+                pendingPauseReason = desired;
+                pendingPauseSince = now;
+            } else if (now - pendingPauseSince >= PAUSE_CONFIRM_TICKS) {
+                setGlobalPauseReason(desired);
+            }
+            return;
+        }
+        boolean recovered;
+        if (retained == 0) {
+            recovered = true;
+        } else if (singleplayer) {
+            recovered = healthy > 0;
+        } else if (globalPauseReason == GlobalPauseReason.SERVER_NETWORK) {
+            recovered = fresh >= 1 && degradedConnections == 0;
+        } else {
+            recovered = healthy > 0 && sourceFailures == 0;
+        }
+        if (!recovered) {
+            healthySince = 0L;
+            return;
+        }
+        if (healthySince == 0L) healthySince = now;
+        if (now - healthySince >= RESUME_CONFIRM_TICKS) setGlobalPauseReason(GlobalPauseReason.NONE);
+    }
+
+    private void setGlobalPauseReason(GlobalPauseReason reason) {
+        if (globalPauseReason == reason) return;
+        CreateCinema.LOGGER.info("Network projector {} global pause {} -> {}", worldPosition,
+                globalPauseReason, reason);
+        globalPauseReason = reason;
+        pendingPauseReason = GlobalPauseReason.NONE;
+        pendingPauseSince = 0L;
+        healthySince = 0L;
+        setChanged();
+        sendData();
+    }
+
+    private void resetPlaybackHealth() {
+        viewerHealth.clear();
+        globalPauseReason = GlobalPauseReason.NONE;
+        pendingPauseReason = GlobalPauseReason.NONE;
+        pendingPauseSince = 0L;
+        healthySince = 0L;
     }
 
     public boolean isMediaOwner(UUID playerId) {
@@ -192,6 +377,7 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
 
     private void navigatePlaylist(int direction) {
         if (level == null || level.isClientSide || !hasContinuousPlayUpgrade() || !hasRemoteControlUpgrade()) return;
+        resetPlaybackHealth();
         navigationDirection = direction < 0 ? -1 : 1;
         navigationOffset += navigationDirection;
         navigationRevision++;
@@ -241,6 +427,7 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         if (url.equals(trimmed) && java.util.Objects.equals(mediaOwner, owner)) return;
         url = trimmed;
         playTime = 0.0;
+        resetPlaybackHealth();
         mediaOwner = owner;
         clearMediaInfo();
         clearDouyinContent();
@@ -267,9 +454,11 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
                 && mediaStatus == safeStatus) return;
 
         if (claimLegacyOwner) mediaOwner = owner;
+        if (mediaRevision != safeRevision) viewerHealth.clear();
         mediaRevision = safeRevision;
         mediaDurationSeconds = safeDuration;
         mediaTimeSeconds = safeTime;
+        mediaTimePlayTimeAnchor = playTime;
         mediaLive = live;
         mediaStatus = safeStatus;
         sync();
@@ -299,6 +488,7 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
     private void clearMediaInfo() {
         mediaDurationSeconds = 0.0;
         mediaTimeSeconds = 0.0;
+        mediaTimePlayTimeAnchor = 0.0;
         mediaLive = false;
         mediaStatus = MediaStatus.IDLE;
         mediaRevision = 0;
@@ -439,7 +629,11 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         tag.putInt("DouyinPlaylistIndex", douyinPlaylistIndex);
         tag.putInt("DouyinPlaylistCount", douyinPlaylistCount);
         tag.putDouble("DouyinContentStartTime", douyinContentStartTime);
-        if (clientPacket) tag.putDouble("PlayTime", playTime);
+        if (clientPacket) {
+            tag.putDouble("PlayTime", playTime);
+            tag.putDouble("MediaTimePlayTimeAnchor", mediaTimePlayTimeAnchor);
+            tag.putString("GlobalPauseReason", globalPauseReason.name());
+        }
     }
 
     @Override
@@ -458,6 +652,8 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         navigationOffset = tag.getInt("NavigationOffset");
         mediaDurationSeconds = sanitizeMediaSeconds(tag.getDouble("MediaDuration"));
         mediaTimeSeconds = sanitizeMediaSeconds(tag.getDouble("MediaTime"));
+        mediaTimePlayTimeAnchor = clientPacket && tag.contains("MediaTimePlayTimeAnchor")
+                ? sanitizeClockSeconds(tag.getDouble("MediaTimePlayTimeAnchor")) : 0.0;
         mediaLive = tag.getBoolean("MediaLive");
         try {
             mediaStatus = MediaStatus.valueOf(tag.getString("MediaStatus"));
@@ -477,6 +673,18 @@ public class NetworkProjectorBlockEntity extends KineticBlockEntity implements C
         douyinContentStartTime = clientPacket
                 ? sanitizeClockSeconds(tag.getDouble("DouyinContentStartTime")) : 0.0;
         playTime = clientPacket && tag.contains("PlayTime") ? tag.getDouble("PlayTime") : 0.0;
+        if (clientPacket) {
+            try {
+                globalPauseReason = GlobalPauseReason.valueOf(tag.getString("GlobalPauseReason"));
+            } catch (IllegalArgumentException ignored) {
+                globalPauseReason = GlobalPauseReason.NONE;
+            }
+        } else {
+            resetPlaybackHealth();
+        }
+    }
+
+    private record ViewerHealth(PlaybackHealth health, long reportedAt) {
     }
 
     private static class HiddenFrequencySlot extends ValueBoxTransform.Dual {

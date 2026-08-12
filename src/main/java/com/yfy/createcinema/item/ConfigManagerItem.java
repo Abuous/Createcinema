@@ -1,5 +1,6 @@
 package com.yfy.createcinema.item;
 
+import com.yfy.createcinema.client.config.ClientConfigManagerScreen;
 import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.Screen;
@@ -26,7 +27,7 @@ public class ConfigManagerItem extends Item {
         if (hand != InteractionHand.MAIN_HAND) return InteractionResultHolder.pass(stack);
         if (level.isClientSide) {
             CatnipServices.PLATFORM.executeOnClientOnly(
-                    () -> com.yfy.createcinema.client.ClientConfigManagerScreen::open);
+                    () -> com.yfy.createcinema.client.config.ClientConfigManagerScreen::open);
         }
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }

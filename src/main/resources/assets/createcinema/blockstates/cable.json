@@ -1,11 +1,13 @@
 {
   "multipart": [
-    { "apply": { "model": "createcinema:block/cable_core" } },
-    { "when": { "north": "true" }, "apply": { "model": "createcinema:block/cable_arm" } },
-    { "when": { "east": "true" },  "apply": { "model": "createcinema:block/cable_arm", "y": 90 } },
-    { "when": { "south": "true" }, "apply": { "model": "createcinema:block/cable_arm", "y": 180 } },
-    { "when": { "west": "true" },  "apply": { "model": "createcinema:block/cable_arm", "y": 270 } },
-    { "when": { "up": "true" },    "apply": { "model": "createcinema:block/cable_arm_up" } },
-    { "when": { "down": "true" },  "apply": { "model": "createcinema:block/cable_arm_down" } }
+    { "when": { "casing": "none" }, "apply": { "model": "createcinema:block/cable_core" } },
+    { "when": { "casing": "none", "north": "true" }, "apply": { "model": "createcinema:block/cable_arm" } },
+    { "when": { "casing": "none", "east": "true" },  "apply": { "model": "createcinema:block/cable_arm", "y": 90 } },
+    { "when": { "casing": "none", "south": "true" }, "apply": { "model": "createcinema:block/cable_arm", "y": 180 } },
+    { "when": { "casing": "none", "west": "true" },  "apply": { "model": "createcinema:block/cable_arm", "y": 270 } },
+    { "when": { "casing": "none", "up": "true" },    "apply": { "model": "createcinema:block/cable_arm_up" } },
+    { "when": { "casing": "none", "down": "true" },  "apply": { "model": "createcinema:block/cable_arm_down" } },
+    { "when": { "casing": "andesite" }, "apply": { "model": "createcinema:block/cable_encased_andesite" } },
+    { "when": { "casing": "brass" },    "apply": { "model": "createcinema:block/cable_encased_brass" } }
   ]
 }
